@@ -6,7 +6,23 @@ export function getDb(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
+  assertServiceKey(key);
   return createClient(url, key, { auth: { persistSession: false } });
+}
+
+/** Garante que a chave é a secreta (service role); a pública não consegue gravar com o RLS ligado. */
+export function assertServiceKey(key: string) {
+  const msg =
+    "SUPABASE_SERVICE_ROLE_KEY está com a chave PÚBLICA do Supabase. Use a chave secreta (começa com sb_secret_ ou é a 'service_role' legada).";
+  if (key.startsWith("sb_publishable_")) throw new Error(msg);
+  if (key.startsWith("eyJ")) {
+    try {
+      const payload = JSON.parse(Buffer.from(key.split(".")[1], "base64url").toString("utf8"));
+      if (payload.role && payload.role !== "service_role") throw new Error(msg);
+    } catch (e) {
+      if ((e as Error).message === msg) throw e;
+    }
+  }
 }
 
 /** Data de hoje no fuso de São Paulo (yyyy-mm-dd). */

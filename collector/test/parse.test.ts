@@ -86,3 +86,28 @@ test("ranking do Reclame Aqui", () => {
   assert.deepEqual(rows[0], { position: 1, name: "Lunna Cosméticos", reputation: "Não Recomendada", complaints: 320, slug: "lunna-cosmeticos" });
   assert.equal(rows[1].complaints, 1223);
 });
+
+test("ranking do Reclame Aqui com variações de layout", () => {
+  const text = [
+    "Top 20 · cadastradas há até 60 dias", "Posição e empresa", "Reclamações",
+    "1º", "Lunna Cosméticos", "Não Recomendada", "320", "reclamações",
+    "2º", "Reel Short", "186", "reclamações",                       // sem reputação
+    "3º", "Coraluz", "C", "Não Recomendada", "150", "reclamações",  // com inicial do logo
+    "4º", "Quebrado", "sem número",                                 // incompleto: ignora
+    "5º", "Italihaus", "Não Recomendada", "86", "reclamações",
+  ].join("\n");
+  const rows = parseRaRanking(text);
+  assert.deepEqual(rows.map((r) => [r.position, r.name, r.complaints]), [
+    [1, "Lunna Cosméticos", 320], [2, "Reel Short", 186], [3, "Coraluz", 150], [5, "Italihaus", 86],
+  ]);
+  assert.equal(rows[1].reputation, null);
+});
+
+test("recusa a chave pública do Supabase", async () => {
+  const { assertServiceKey } = await import("../src/db.js");
+  assert.throws(() => assertServiceKey("sb_publishable_abc"), /PÚBLICA/);
+  const jwt = (role: string) => "eyJhbGciOiJIUzI1NiJ9." + Buffer.from(JSON.stringify({ role })).toString("base64url") + ".x";
+  assert.throws(() => assertServiceKey(jwt("anon")), /PÚBLICA/);
+  assert.doesNotThrow(() => assertServiceKey(jwt("service_role")));
+  assert.doesNotThrow(() => assertServiceKey("sb_secret_abc"));
+});

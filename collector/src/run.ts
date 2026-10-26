@@ -23,6 +23,9 @@ function makeMetaSource(): MetaAdSource {
 
 async function runMeta(client: ReturnType<typeof db.getDb>, day: string) {
   const keywords = client ? await db.loadKeywords(client) : FALLBACK_KEYWORDS;
+  if (!keywords.length) {
+    throw new Error("Nenhuma palavra-chave ativa no banco (ou a chave do Supabase não tem permissão para ler).");
+  }
   const ignored = client ? await db.loadIgnored(client) : new Set<string>();
   const source = makeMetaSource();
   const results: KeywordResult[] = [];
