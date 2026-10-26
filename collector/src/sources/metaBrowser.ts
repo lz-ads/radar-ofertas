@@ -34,19 +34,21 @@ export class MetaBrowserSource implements MetaAdSource {
 
     // espera os cards aparecerem (ou desiste em 20s)
     await page.waitForFunction(
-      () => document.body.innerText.includes("Identificação da biblioteca"),
+      () => !!document.body?.innerText?.includes("Identificação da biblioteca"),
       undefined,
       { timeout: 20_000 },
     ).catch(() => {});
 
-    const scrolls = this.opts.scrolls ?? 6;
+    const scrolls = this.opts.scrolls ?? 10;
     for (let i = 0; i < scrolls; i++) {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page
+        .evaluate(() => window.scrollTo(0, (document.scrollingElement ?? document.documentElement)?.scrollHeight ?? 0))
+        .catch(() => {}); // a página pode estar recarregando; segue para a próxima rolagem
       await jitter(1400, 2400);
     }
     await sleep(800);
 
-    const text = await page.evaluate(() => document.body.innerText);
+    const text = await page.evaluate(() => document.body?.innerText ?? "");
     if (/Faça login|Log in to continue|Entre no Facebook/i.test(text) && !text.includes("Identificação da biblioteca")) {
       throw new Error("A Meta pediu login para a busca — o IP do robô pode ter sido bloqueado.");
     }

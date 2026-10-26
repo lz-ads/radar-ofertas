@@ -58,7 +58,7 @@ HEADFUL=1 npm run collect:meta # abre o navegador; sem as variáveis do Supabase
 ## Ajustes
 
 - **Palavras-chave e anunciantes ignorados:** pela página *Palavras-chave* do painel.
-- **Profundidade:** a variável `META_SCROLLS` (padrão 6) controla quantos anúncios são lidos por busca. Cada rolagem lê de 10 a 15.
+- **Profundidade:** a variável `META_SCROLLS` (padrão 10) controla quantos anúncios são lidos por busca. Cada rolagem lê de 10 a 15.
 - **Horários:** mude o `cron` em `.github/workflows/coletar.yml`.
 
 ## Trocar pelo provedor pago depois

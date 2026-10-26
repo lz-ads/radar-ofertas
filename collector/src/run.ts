@@ -21,7 +21,7 @@ const want = (s: string) => only.length === 0 || only.includes(s);
  * Qualquer classe que implemente MetaAdSource funciona.
  */
 function makeMetaSource(): MetaAdSource {
-  return new MetaBrowserSource({ scrolls: Number(process.env.META_SCROLLS || 6) });
+  return new MetaBrowserSource({ scrolls: Number(process.env.META_SCROLLS || 10) });
 }
 
 async function runMeta(client: ReturnType<typeof db.getDb>, day: string) {

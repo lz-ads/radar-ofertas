@@ -120,9 +120,11 @@ export async function raAlreadyToday(db: SupabaseClient, day: string): Promise<b
 
 export async function saveRa(db: SupabaseClient, day: string, rows: RaCompany[]) {
   if (!rows.length) return;
+  // o ranking pode repetir o mesmo nome em posições diferentes: fica a melhor posição
+  const unique = [...new Map([...rows].reverse().map((r) => [r.name, r] as const)).values()].sort((a, b) => a.position - b.position);
   check(
     await db.from("ra_new_companies").upsert(
-      rows.map((r) => ({ day, position: r.position, name: r.name, slug: r.slug, reputation: r.reputation, complaints: r.complaints })),
+      unique.map((r) => ({ day, position: r.position, name: r.name, slug: r.slug, reputation: r.reputation, complaints: r.complaints })),
       { onConflict: "day,name" },
     ),
     "ra_new_companies",
