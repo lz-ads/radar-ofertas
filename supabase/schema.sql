@@ -92,7 +92,8 @@ create table if not exists runs (
 );
 
 -- Ranking: última foto de cada oferta + crescimento contra ~7 dias atrás + Google
-create or replace view offer_ranking as
+-- security_invoker: a view respeita o RLS das tabelas (não fica exposta pela chave pública)
+create or replace view offer_ranking with (security_invoker = true) as
 with latest as (
   select distinct on (offer_key) *
   from offer_snapshots
