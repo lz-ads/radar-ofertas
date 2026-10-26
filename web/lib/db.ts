@@ -1,0 +1,34 @@
+import "server-only";
+import { createClient } from "@supabase/supabase-js";
+
+export function db() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nas variáveis da Vercel.");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+export interface OfferRow {
+  offer_key: string;
+  advertiser: string;
+  advertisers: string[];
+  domain: string | null;
+  last_day: string;
+  cards: number;
+  copies: number;
+  pages: number;
+  oldest_start: string | null;
+  keywords: string[];
+  sample_text: string | null;
+  cards_7d: number | null;
+  copies_7d: number | null;
+  copies_growth: number;
+  google_ads: number | null;
+  first_seen: string;
+  score: number;
+}
+
+export const fmtDate = (d: string | null) => (d ? d.split("-").reverse().join("/") : "—");
+
+export const libraryLink = (q: string) =>
+  `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=BR&search_type=keyword_unordered&q=${encodeURIComponent(q)}`;
