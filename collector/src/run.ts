@@ -10,6 +10,9 @@ import type { KeywordResult, MetaAdSource } from "./types.js";
 // Usado só quando o banco não está configurado (teste local)
 const FALLBACK_KEYWORDS = ["pagamento na entrega", "compre 2 leve 3", "acesso imediato"];
 
+/** Linhas de resumo publicadas como anotação no GitHub Actions. */
+const notes: string[] = [];
+
 const only = (process.argv.find((a) => a.startsWith("--only=")) || "").replace("--only=", "").split(",").filter(Boolean);
 const want = (s: string) => only.length === 0 || only.includes(s);
 
@@ -51,6 +54,7 @@ async function runMeta(client: ReturnType<typeof db.getDb>, day: string) {
   const ads = mergeAds(results, ignored);
   const snaps = buildSnapshots(ads);
   console.log(`[meta] ${ads.length} anúncios únicos, ${snaps.length} ofertas`);
+  notes.push(`Meta: ${results.length}/${keywords.length} buscas ok, ${ads.length} anúncios, ${snaps.length} ofertas` + (errors.length ? `. Falhas: ${errors.slice(0, 5).join(" | ")}` : ""));
 
   // Se a maior parte das buscas falhou, não sobrescreve a foto do dia com dados incompletos
   const healthy = results.length >= Math.ceil(keywords.length / 2);
@@ -89,6 +93,7 @@ async function runGoogle(client: NonNullable<ReturnType<typeof db.getDb>>, day: 
     await source.close();
   }
   await db.logRun(client, "google", true, n);
+  notes.push(`Google: ${n}/${domains.length} domínios contados`);
 }
 
 async function runRa(client: ReturnType<typeof db.getDb>, day: string) {
@@ -98,6 +103,7 @@ async function runRa(client: ReturnType<typeof db.getDb>, day: string) {
   }
   const rows = await fetchRaNewCompanies();
   console.log(`[ra] ${rows.length} empresas`);
+  notes.push(`Reclame Aqui: ${rows.length} empresas`);
   if (client) {
     await db.saveRa(client, day, rows);
     await db.logRun(client, "reclameaqui", rows.length > 0, rows.length);
@@ -127,6 +133,14 @@ async function main() {
   if (want("ra")) await step("reclameaqui", () => runRa(client, day));
 
   await closeBrowser();
+
+  // Anotações do GitHub Actions: aparecem no resumo da execução e podem ser lidas pela API
+  if (process.env.GITHUB_ACTIONS) {
+    const esc = (s: string) => s.replace(/%/g, "%25").replace(/\r/g, "").replace(/\n/g, "%0A");
+    for (const n of notes) console.log(`::notice title=Resumo::${esc(n)}`);
+    for (const f of failures) console.log(`::error title=Falha::${esc(f.slice(0, 1500))}`);
+  }
+
   if (failures.length) {
     console.error("\nFalhas:\n" + failures.join("\n"));
     process.exit(1);
