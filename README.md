@@ -66,8 +66,39 @@ cd web && npm install && RADAR_DEMO=1 npm run dev
 ## Ajustes
 
 - **Palavras-chave e anunciantes ignorados:** pela página *Palavras-chave* do painel.
-- **Profundidade:** a variável `META_SCROLLS` (padrão 10) controla quantos anúncios são lidos por busca. Cada rolagem lê de 10 a 15.
+- **Profundidade:** o robô rola cada busca até parar de carregar anúncios (`META_SCROLLS`, padrão 25 rolagens; `META_MAX_CARDS`, padrão 150 anúncios).
 - **Horários:** mude o `cron` em `.github/workflows/coletar.yml`.
+
+## Recursos extras (todos gratuitos)
+
+| Recurso | O que faz | Precisa configurar |
+| --- | --- | --- |
+| Ofertas duplicadas | Anúncios sem site do mesmo anunciante ou da mesma página entram na oferta com site | nada |
+| Tipo de destino | Marca se o anúncio leva para site, WhatsApp, Instagram, formulário, mensagem ou app | nada |
+| Raio-X da página | Visita cada página de vendas 1x por semana: plataforma, checkout, preços, parcelas, pagamento na entrega, VSL, contador, pixels | nada |
+| IA (Gemini) | Nicho, tipo, público, promessa, mecanismo, oferta e risco de reprovação | secret `GEMINI_API_KEY` |
+| Criativos | Guarda as imagens dos anúncios em webp no Supabase Storage (o link do Facebook expira) | nada |
+| Alertas | Telegram quando uma oferta entra no top 20 ou dispara em cópias | secrets `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` |
+| Funil | ☆ no ranking, status e notas por oferta, página `/funil` | nada |
+| Status | Página `/status` com a saúde de cada etapa + aviso de falha no Telegram + vigia diário da Vercel | Vercel: `CRON_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+
+### Chave do Gemini
+1. Entre em aistudio.google.com/apikey com sua conta Google e clique em **Create API key**.
+2. No GitHub: **Settings → Secrets and variables → Actions → New repository secret**, nome `GEMINI_API_KEY`.
+
+A cota grátis do Gemini pode usar os textos enviados para treinar os modelos do Google. Aqui só vão textos públicos de anúncios e páginas.
+
+### Bot do Telegram
+1. No Telegram, fale com **@BotFather**, mande `/newbot` e escolha um nome. Ele devolve o token.
+2. Mande qualquer mensagem para o seu bot novo.
+3. Abra `https://api.telegram.org/bot<TOKEN>/getUpdates` no navegador e copie o número em `"chat":{"id": ...}`.
+4. No GitHub, crie os secrets `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Na Vercel, crie as mesmas variáveis e mais `CRON_SECRET` (qualquer texto longo e aleatório).
+
+### Banco
+Instalação nova: rode `supabase/schema.sql`. Instalação antiga: rode, em ordem, os arquivos de `supabase/migrations/` que ainda não rodou.
+
+### Repositório público
+Com o repositório público, o GitHub Actions não tem limite de minutos. Chaves e senhas ficam nos *secrets* e nunca aparecem. Os registros das coletas (logs) ficam visíveis, mas só mostram dados públicos de anúncios. O GitHub desliga agendamentos de repositórios públicos sem atividade por 60 dias; o vigia da Vercel avisa no Telegram se a coleta parar.
 
 ## Trocar pelo provedor pago depois
 

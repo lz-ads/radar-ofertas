@@ -31,6 +31,60 @@ export interface OfferRow {
   landing_url: string | null;
   page_url: string | null;
   thumb_url: string | null;
+  dest_type: DestType | null;
+  thumb_path: string | null;
+  // raio-X da página de vendas
+  platform: string | null;
+  checkout: string | null;
+  price_min: number | string | null;
+  price_max: number | string | null;
+  installments: string | null;
+  cod: boolean | null;
+  has_vsl: boolean | null;
+  pixels: string[] | null;
+  // IA
+  niche: string | null;
+  kind: string | null;
+  audience: string | null;
+  promise: string | null;
+  mechanism: string | null;
+  offer: string | null;
+  risk: string | null;
+  risk_reason: string | null;
+  // funil
+  status: Status | null;
+  note: string | null;
+  discarded: boolean;
+}
+
+export type DestType = "site" | "whatsapp" | "instagram" | "formulario" | "mensagem" | "app" | "ligacao";
+export const DEST_LABEL: Record<DestType, string> = {
+  site: "site", whatsapp: "whatsapp", instagram: "instagram", formulario: "formulário", mensagem: "mensagem", app: "app", ligacao: "ligação",
+};
+
+export const STATUSES = ["favorita", "analisando", "modelando", "testando", "descartada"] as const;
+export type Status = (typeof STATUSES)[number];
+export const STATUS_LABEL: Record<Status, string> = {
+  favorita: "★ favorita", analisando: "analisando", modelando: "modelando", testando: "testando", descartada: "descartada",
+};
+
+export const KIND_LABEL: Record<string, string> = {
+  "produto fisico": "produto físico", infoproduto: "infoproduto", nutra: "nutra", servico: "serviço", app: "app", outro: "outro",
+};
+
+/** Endereço público da imagem guardada no Storage, ou o link original do Facebook. */
+export function creativeSrc(path: string | null | undefined, fallback: string | null | undefined): string | null {
+  if (path && process.env.SUPABASE_URL) return `${process.env.SUPABASE_URL.replace(/\/$/, "")}/storage/v1/object/public/criativos/${path}`;
+  return fallback ?? null;
+}
+
+const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
+/** "R$ 97" ou "R$ 97 – 297" */
+export function priceRange(min: number | string | null, max: number | string | null): string | null {
+  if (min === null || min === undefined) return null;
+  const a = Number(min), b = Number(max ?? min);
+  const f = (n: number) => brl.format(n).replace(",00", "");
+  return a === b ? f(a) : `${f(a)} – ${f(b).replace("R$", "").trim()}`;
 }
 
 /** "https://www.loja.com.br/products/kit-3?variant=1" -> "loja.com.br/products/kit-3" */

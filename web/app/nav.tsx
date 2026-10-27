@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { href: "/", file: "ranking", ext: ".tsx" },
+  { href: "/funil", file: "funil", ext: ".tsx" },
   { href: "/reclame-aqui", file: "reclame-aqui", ext: ".tsx" },
   { href: "/palavras-chave", file: "palavras-chave", ext: ".tsx" },
+  { href: "/status", file: "status", ext: ".log" },
 ];
 
 export function Nav() {

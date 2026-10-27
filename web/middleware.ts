@@ -17,4 +17,5 @@ export function middleware(req: NextRequest) {
   });
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+// /api/cron é chamado pela Vercel e se protege com CRON_SECRET
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron).*)"] };

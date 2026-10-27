@@ -3,8 +3,11 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
+type Opt = { value: string; label: string; count?: number };
+
 interface Props {
   keywords: { term: string; count: number }[];
+  facets: { nicho: Opt[]; tipo: Opt[]; destino: Opt[]; checkout: Opt[] };
   shown: number;
   total: number;
   hiddenWeak: number;
@@ -16,13 +19,38 @@ const TOGGLES = [
   { key: "novas", label: "novas (7 dias)" },
   { key: "google", label: "também no Google" },
   { key: "site", label: "com página de vendas" },
+  { key: "cod", label: "pagamento na entrega" },
+  { key: "vsl", label: "com VSL" },
 ] as const;
+
+const PRICES = [
+  { value: "50", label: "até R$ 50" },
+  { value: "100", label: "até R$ 100" },
+  { value: "200", label: "até R$ 200" },
+  { value: "500", label: "até R$ 500" },
+];
+
+const RISKS = [
+  { value: "baixo", label: "risco baixo" },
+  { value: "medio", label: "risco médio" },
+  { value: "alto", label: "risco alto" },
+];
+
+const STATUS = [
+  { value: "funil", label: "no meu funil" },
+  { value: "favorita", label: "★ favoritas" },
+  { value: "analisando", label: "analisando" },
+  { value: "modelando", label: "modelando" },
+  { value: "testando", label: "testando" },
+  { value: "descartada", label: "descartadas" },
+  { value: "todos", label: "incluir descartadas" },
+];
 
 /**
  * Barra de filtros ao vivo: cada mudança atualiza a URL (sem botão "Filtrar").
  * A busca espera o usuário parar de digitar; o resto aplica na hora.
  */
-export function FilterBar({ keywords, shown, total, hiddenWeak, exportHref }: Props) {
+export function FilterBar({ keywords, facets, shown, total, hiddenWeak, exportHref }: Props) {
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
@@ -60,8 +88,24 @@ export function FilterBar({ keywords, shown, total, hiddenWeak, exportHref }: Pr
   }, []);
 
   const kw = params.get("kw") ?? "";
-  const anyFilter = !!(params.get("q") || kw || TOGGLES.some((t) => params.get(t.key)));
+  const SELECTS = ["nicho", "tipo", "destino", "checkout", "preco", "risco", "status"] as const;
+  const anyFilter = !!(params.get("q") || kw || TOGGLES.some((t) => params.get(t.key)) || SELECTS.some((k) => params.get(k)));
   const todas = params.get("todas") === "1";
+
+  const Select = ({ name, label, opts }: { name: string; label: string; opts: Opt[] }) => {
+    const v = params.get(name) ?? "";
+    return (
+      <label className={`facet${v ? " on" : ""}`}>
+        <span className="sr-only">{label}</span>
+        <select value={v} onChange={(e) => push({ [name]: e.target.value || null })} aria-label={label}>
+          <option value="">{label}</option>
+          {opts.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}{o.count !== undefined ? ` (${o.count})` : ""}</option>
+          ))}
+        </select>
+      </label>
+    );
+  };
 
   return (
     <section className="filterbar" aria-label="Filtros" data-pending={pending || undefined}>
@@ -73,11 +117,24 @@ export function FilterBar({ keywords, shown, total, hiddenWeak, exportHref }: Pr
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="anunciante, site ou texto do anúncio"
-            aria-label="Buscar anunciante, site ou texto do anúncio"
+            placeholder="anunciante, site, texto ou promessa"
+            aria-label="Buscar anunciante, site, texto do anúncio ou promessa"
           />
           <kbd aria-hidden="true">/</kbd>
         </label>
+      </div>
+
+      <div className="fb-row facets" role="group" aria-label="Filtrar por">
+        {facets.nicho.length > 0 && <Select name="nicho" label="nicho" opts={facets.nicho} />}
+        {facets.tipo.length > 0 && <Select name="tipo" label="tipo" opts={facets.tipo} />}
+        {facets.destino.length > 0 && <Select name="destino" label="destino" opts={facets.destino} />}
+        {facets.checkout.length > 0 && <Select name="checkout" label="plataforma" opts={facets.checkout} />}
+        <Select name="preco" label="preço" opts={PRICES} />
+        <Select name="risco" label="risco" opts={RISKS} />
+        <Select name="status" label="funil" opts={STATUS} />
+      </div>
+
+      <div className="fb-row">
         <div className="toggles" role="group" aria-label="Mostrar só">
           {TOGGLES.map((t) => {
             const on = params.get(t.key) === "1";

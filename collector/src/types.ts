@@ -1,3 +1,5 @@
+export type DestType = "site" | "whatsapp" | "instagram" | "formulario" | "mensagem" | "app" | "ligacao";
+
 /** Um anúncio lido da Biblioteca de Anúncios da Meta. */
 export interface MetaAd {
   libraryId: string;
@@ -6,6 +8,8 @@ export interface MetaAd {
   body: string;
   startDate: string | null; // ISO yyyy-mm-dd
   copies: number;           // "X anúncios usam esse criativo e esse texto"
+  cta?: string | null;        // botão do anúncio ("Saiba mais", "Enviar mensagem"...)
+  destType?: DestType | null; // para onde o anúncio leva
   pageUrl?: string | null;    // página do anunciante no Facebook
   landingUrl?: string | null; // página de destino (vendas), sem parâmetros de rastreio
   thumbUrl?: string | null;   // imagem do criativo (ou capa do vídeo)
@@ -65,4 +69,5 @@ export interface OfferSnapshot {
   landingUrl: string | null;
   pageUrl: string | null;
   thumbUrl: string | null;
+  destType: DestType | null;
 }

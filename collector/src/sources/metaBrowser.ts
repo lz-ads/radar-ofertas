@@ -19,7 +19,7 @@ export class MetaBrowserSource implements MetaAdSource {
   private ctx: BrowserContext | null = null;
   private page: Page | null = null;
 
-  constructor(private opts: { scrolls?: number; country?: string } = {}) {}
+  constructor(private opts: { scrolls?: number; maxCards?: number; country?: string } = {}) {}
 
   private async getPage() {
     if (!this.page) {
@@ -40,12 +40,31 @@ export class MetaBrowserSource implements MetaAdSource {
       { timeout: 20_000 },
     ).catch(() => {});
 
-    const scrolls = this.opts.scrolls ?? 10;
-    for (let i = 0; i < scrolls; i++) {
+    // rola até a página parar de carregar anúncios novos (ou até o limite)
+    const maxScrolls = this.opts.scrolls ?? 25;
+    const maxCards = this.opts.maxCards ?? 150;
+    const countCards = () =>
+      page.evaluate(() => (document.body?.innerText.match(/Identificação da biblioteca/g) || []).length).catch(() => 0);
+    let last = await countCards();
+    let stale = 0;
+    for (let i = 0; i < maxScrolls && last < maxCards && stale < 3; i++) {
+      await page.mouse.wheel(0, 4000).catch(() => {});
       await page
         .evaluate(() => window.scrollTo(0, (document.scrollingElement ?? document.documentElement)?.scrollHeight ?? 0))
         .catch(() => {}); // a página pode estar recarregando; segue para a próxima rolagem
-      await jitter(1400, 2400);
+      await jitter(1600, 2600);
+      let now = await countCards();
+      if (now <= last) {
+        // às vezes a lista para e mostra um botão "Ver mais" no fim
+        const more = page.getByText(/^(Ver mais|See more|Carregar mais)$/).last();
+        if (await more.isVisible().catch(() => false)) {
+          await more.click({ timeout: 3000 }).catch(() => {});
+          await jitter(1800, 2800);
+          now = await countCards();
+        }
+      }
+      stale = now > last ? 0 : stale + 1;
+      last = now;
     }
     await sleep(800);
 

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Rodar só uma fonte (meta, google, ra) — vazio roda tudo"
+        description: "Rodar só algumas etapas (meta, criativos, google, ra, paginas, ia, alertas), separadas por vírgula. Vazio roda tudo."
         required: false
         default: ""
 
@@ -15,10 +15,13 @@ concurrency:
   group: coletar
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   coletar:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: collector
@@ -43,9 +46,28 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PANEL_URL: ${{ vars.PANEL_URL }}
+          ONLY: ${{ github.event.inputs.only }}
         run: |
-          if [ -n "${{ github.event.inputs.only }}" ]; then
-            npm run collect -- --only=${{ github.event.inputs.only }}
+          if [ -n "$ONLY" ]; then
+            npm run collect -- "--only=$ONLY"
           else
             npm run collect
           fi
+
+      # se o job quebrar antes do robô rodar (instalação, testes, tempo esgotado), avisa também
+      - name: Avisar falha no Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -z "$TELEGRAM_BOT_TOKEN" ] && exit 0
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=⚠️ <b>Radar: o job da coleta falhou</b> (instalação, testes ou tempo esgotado). <a href=\"${RUN_URL}\">ver execução</a>" > /dev/null

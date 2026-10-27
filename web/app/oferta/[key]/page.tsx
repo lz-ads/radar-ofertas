@@ -1,12 +1,22 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db, fmtDate, libraryLink, shortUrl, type OfferRow } from "@/lib/db";
+import { creativeSrc, db, DEST_LABEL, fmtDate, KIND_LABEL, libraryLink, priceRange, shortUrl, STATUSES, STATUS_LABEL, type OfferRow } from "@/lib/db";
+import { saveNote, setStatus } from "../../actions";
 import { CopyButton, Thumb } from "../../bits";
 
 export const dynamic = "force-dynamic";
 
 interface Snap { day: string; cards: number; copies: number; pages: number }
-interface Ad { library_id: string; advertiser: string; body: string | null; start_date: string | null; copies: number; last_seen: string; domain: string | null; landing_url: string | null; page_url: string | null; thumb_url: string | null; media_type: string | null }
+interface Ad {
+  library_id: string; advertiser: string; body: string | null; start_date: string | null; copies: number; last_seen: string;
+  domain: string | null; landing_url: string | null; page_url: string | null; thumb_url: string | null; thumb_path: string | null;
+  media_type: string | null; cta: string | null;
+}
+interface Landing {
+  url: string; final_url: string | null; title: string | null; description: string | null; platform: string | null; checkout: string | null;
+  prices: (number | string)[]; price_min: number | string | null; price_max: number | string | null; installments: string | null;
+  cod: boolean; has_vsl: boolean; has_countdown: boolean; has_whatsapp: boolean; pixels: string[]; error: string | null; checked_at: string;
+}
 
 function Chart({ data }: { data: Snap[] }) {
   if (data.length < 2) {
@@ -41,28 +51,53 @@ function Chart({ data }: { data: Snap[] }) {
   );
 }
 
+const Row = ({ k, children }: { k: string; children: React.ReactNode }) => (
+  <div className="kv"><dt>{k}</dt><dd>{children}</dd></div>
+);
+const yes = (v: boolean | null | undefined) => (v ? <span className="up">sim</span> : <span className="dim">não</span>);
+
 export default async function Oferta({ params }: { params: Promise<{ key: string }> }) {
-  const key = decodeURIComponent((await params).key);
+  let key = decodeURIComponent((await params).key);
   const client = db();
+  // link antigo (anunciante sem site) que foi juntado a outra oferta
+  const { data: alias } = await client.from("offer_aliases").select("target").eq("alias", key).maybeSingle();
+  if (alias) key = (alias as { target: string }).target;
+
   const [{ data: offer }, { data: snaps }, { data: ads }] = await Promise.all([
     client.from("offer_ranking").select("*").eq("offer_key", key).maybeSingle(),
     client.from("offer_snapshots").select("day, cards, copies, pages").eq("offer_key", key).order("day").limit(90),
-    client.from("ads").select("library_id, advertiser, body, start_date, copies, last_seen, domain, landing_url, page_url, thumb_url, media_type").eq("offer_key", key)
-      .order("copies", { ascending: false }).limit(60),
+    client.from("ads").select("library_id, advertiser, body, start_date, copies, last_seen, domain, landing_url, page_url, thumb_url, thumb_path, media_type, cta")
+      .eq("offer_key", key).order("copies", { ascending: false }).limit(60),
   ]);
   if (!offer && !snaps?.length) notFound();
   const o = offer as OfferRow | null;
   const name = o?.advertiser ?? key.slice(2);
   const list = (ads ?? []) as Ad[];
+  const { data: lp } = o?.landing_url
+    ? await client.from("landing_pages").select("*").eq("url", o.landing_url).maybeSingle()
+    : { data: null };
+  const page = lp as Landing | null;
+  const gallery = list.filter((a) => a.thumb_path || a.thumb_url).slice(0, 24);
+  const prices = page?.prices?.map(Number).filter((n) => Number.isFinite(n)) ?? [];
 
   return (
     <>
       <p className="comment"><Link href="/">ranking</Link>{" / "}<span>{o?.domain ?? "oferta"}</span></p>
       <h1>{name}</h1>
-      <p className="lede" style={{ marginBottom: 28 }}>
+      <p className="lede" style={{ marginBottom: 20 }}>
         {o?.domain ? <a className="mono" href={`https://${o.domain}`} target="_blank" rel="noreferrer">{o.domain} ↗</a> : "Sem site próprio identificado."}
         {o && o.advertisers.length > 1 && <> Rodando em {o.advertisers.length} páginas: {o.advertisers.join(", ")}.</>}
       </p>
+
+      {/* funil: status em um clique */}
+      <form action={setStatus} className="status-bar" aria-label="Status no funil">
+        <input type="hidden" name="key" value={key} />
+        {STATUSES.map((s) => (
+          <button key={s} name="status" value={o?.status === s ? "" : s} className={`status-btn s-${s}`} aria-pressed={o?.status === s}>
+            {STATUS_LABEL[s]}
+          </button>
+        ))}
+      </form>
 
       {o && (
         <div className="readout">
@@ -90,6 +125,9 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
               </span>
             </div>
           )}
+          {!o?.landing_url && o?.dest_type && o.dest_type !== "site" && (
+            <p className="muted" style={{ marginTop: 0 }}>Os anúncios levam para {DEST_LABEL[o.dest_type]}, não para uma página de vendas.</p>
+          )}
           <ul className="links">
             {o?.page_url && <li><a href={o.page_url} target="_blank" rel="noreferrer">Página no Facebook ↗</a></li>}
             <li><a href={libraryLink(o?.domain ?? name)} target="_blank" rel="noreferrer">Biblioteca da Meta ↗</a></li>
@@ -100,20 +138,89 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
         </section>
       </div>
 
+      <div className="split even">
+        <section className="panel">
+          <h2>Raio-X da página</h2>
+          {page && !page.error ? (
+            <dl className="kvs">
+              {page.title && <Row k="título">{page.title}</Row>}
+              <Row k="feita em">{page.platform ?? <span className="dim">não identificado</span>}</Row>
+              <Row k="checkout">{page.checkout ?? <span className="dim">não identificado</span>}</Row>
+              <Row k="preços">{prices.length ? prices.map((p) => priceRange(p, p)).join(" · ") : <span className="dim">nenhum na página</span>}</Row>
+              {page.installments && <Row k="parcelas">{page.installments}</Row>}
+              <Row k="pagamento na entrega">{yes(page.cod)}</Row>
+              <Row k="vídeo de vendas">{yes(page.has_vsl)}</Row>
+              <Row k="contador / escassez">{yes(page.has_countdown)}</Row>
+              <Row k="botão de WhatsApp">{yes(page.has_whatsapp)}</Row>
+              <Row k="pixels">{page.pixels?.length ? page.pixels.join(", ") : <span className="dim">nenhum detectado</span>}</Row>
+              <Row k="analisada em">{new Date(page.checked_at).toLocaleDateString("pt-BR")}</Row>
+            </dl>
+          ) : page?.error ? (
+            <p className="muted">Não deu para abrir a página na última tentativa ({page.error.slice(0, 120)}). O robô tenta de novo em 7 dias.</p>
+          ) : (
+            <p className="muted">{o?.landing_url ? "A página entra na fila do robô na próxima coleta." : "Sem página de vendas para analisar."}</p>
+          )}
+        </section>
+
+        <section className="panel">
+          <h2>Leitura da IA</h2>
+          {o?.niche ? (
+            <dl className="kvs">
+              <Row k="nicho">{o.niche}</Row>
+              <Row k="tipo">{o.kind ? KIND_LABEL[o.kind] ?? o.kind : "—"}</Row>
+              {o.audience && <Row k="público">{o.audience}</Row>}
+              {o.promise && <Row k="promessa">{o.promise}</Row>}
+              {o.mechanism && <Row k="mecanismo">{o.mechanism}</Row>}
+              {o.offer && <Row k="oferta">{o.offer}</Row>}
+              <Row k="risco de reprovação">
+                <span className={o.risk === "alto" ? "warn" : o.risk === "baixo" ? "up" : ""}>{o.risk === "medio" ? "médio" : o.risk ?? "—"}</span>
+                {o.risk_reason && <span className="dim"> · {o.risk_reason}</span>}
+              </Row>
+            </dl>
+          ) : (
+            <p className="muted">Ainda não classificada. A IA analisa as ofertas com sinal de escala a cada coleta.</p>
+          )}
+        </section>
+      </div>
+
+      <section className="panel" style={{ marginBottom: 32 }}>
+        <h2>Minhas notas</h2>
+        <form action={saveNote} className="note-form">
+          <input type="hidden" name="key" value={key} />
+          <textarea name="note" defaultValue={o?.note ?? ""} rows={4} placeholder="Ângulo, o que modelar, ideias de criativo, resultado do teste…" aria-label="Notas sobre a oferta" />
+          <button className="btn">Salvar nota</button>
+        </form>
+      </section>
+
+      {gallery.length > 0 && (
+        <>
+          <h2>Criativos <span className="dim mono" style={{ fontSize: 14 }}>[{gallery.length}]</span></h2>
+          <div className="gallery" style={{ marginBottom: 32 }}>
+            {gallery.map((a) => (
+              <a key={a.library_id} href={`https://www.facebook.com/ads/library/?id=${a.library_id}`} target="_blank" rel="noreferrer" className="g-item" title={`${a.advertiser} · ${a.copies} ${a.copies === 1 ? "cópia" : "cópias"}`}>
+                <Thumb src={creativeSrc(a.thumb_path, a.thumb_url)} alt={`Criativo de ${a.advertiser}`} video={a.media_type === "video"} />
+                <span className="g-cap mono">{a.copies}×</span>
+              </a>
+            ))}
+          </div>
+        </>
+      )}
+
       <h2>Anúncios coletados <span className="dim mono" style={{ fontSize: 14 }}>[{list.length}]</span></h2>
       <section className="panel">
         {list.map((a) => (
           <article className="ad" key={a.library_id}>
-            <Thumb src={a.thumb_url} alt={`Criativo de ${a.advertiser}`} video={a.media_type === "video"} />
+            <Thumb src={creativeSrc(a.thumb_path, a.thumb_url)} alt={`Criativo de ${a.advertiser}`} video={a.media_type === "video"} />
             <div className="ad-body">
-            <div className="ad-head">
-              <b>{a.advertiser}</b>
-              <span className="mono">desde {fmtDate(a.start_date)}</span>
-              <span className="mono">{a.copies} {a.copies === 1 ? "cópia" : "cópias"}</span>
-              <a className="ext-link" href={`https://www.facebook.com/ads/library/?id=${a.library_id}`} target="_blank" rel="noreferrer">ver anúncio ↗</a>
-              {a.landing_url && <a className="ext-link" href={a.landing_url} target="_blank" rel="noreferrer noopener" title={a.landing_url}>{shortUrl(a.landing_url, 34)} ↗</a>}
-            </div>
-            {a.body && <p>{a.body}</p>}
+              <div className="ad-head">
+                <b>{a.advertiser}</b>
+                <span className="mono">desde {fmtDate(a.start_date)}</span>
+                <span className="mono">{a.copies} {a.copies === 1 ? "cópia" : "cópias"}</span>
+                {a.cta && <span className="mono">botão: {a.cta}</span>}
+                <a className="ext-link" href={`https://www.facebook.com/ads/library/?id=${a.library_id}`} target="_blank" rel="noreferrer">ver anúncio ↗</a>
+                {a.landing_url && <a className="ext-link" href={a.landing_url} target="_blank" rel="noreferrer noopener" title={a.landing_url}>{shortUrl(a.landing_url, 34)} ↗</a>}
+              </div>
+              {a.body && <p>{a.body}</p>}
             </div>
           </article>
         ))}

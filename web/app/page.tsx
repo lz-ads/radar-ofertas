@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { db, fmtDate, libraryLink, shortUrl } from "@/lib/db";
-import { countAll, hrefWith, isFiltered, PAGE_SIZE, parseFilters, queryOffers, type Filters, type SortKey } from "@/lib/query";
+import { creativeSrc, db, DEST_LABEL, fmtDate, KIND_LABEL, libraryLink, priceRange, shortUrl, type DestType, type OfferRow } from "@/lib/db";
+import { countAll, hrefWith, isFiltered, PAGE_SIZE, parseFilters, queryOffers, STRONG_SIGNAL, type Filters, type SortKey } from "@/lib/query";
+import { toggleFavorite } from "./actions";
 import { CopyButton, Thumb } from "./bits";
 import { FilterBar } from "./filter-bar";
 import { C, Cursor, K, N, S, Terminal } from "./terminal";
@@ -16,7 +17,7 @@ const fmtRun = (iso: string) =>
 /** Cabeçalho que ordena ao clicar (segundo clique inverte). */
 function SortTh({ f, k, label, num, title }: { f: Filters; k: SortKey; label: string; num?: boolean; title?: string }) {
   const active = f.sort === k;
-  const nextDir = active ? (f.dir === "desc" ? "asc" : "desc") : k === "nome" || k === "desde" ? "asc" : "desc";
+  const nextDir = active ? (f.dir === "desc" ? "asc" : "desc") : ["nome", "desde", "preco"].includes(k) ? "asc" : "desc";
   return (
     <th className={num ? "n" : undefined} aria-sort={active ? (f.dir === "asc" ? "ascending" : "descending") : undefined} title={title}>
       <Link className={`sort${active ? " on" : ""}`} href={hrefWith(f, { sort: k, dir: nextDir, limit: PAGE_SIZE })} scroll={false}>
@@ -26,17 +27,26 @@ function SortTh({ f, k, label, num, title }: { f: Filters; k: SortKey; label: st
   );
 }
 
+type FacetRow = Pick<OfferRow, "keywords" | "niche" | "kind" | "dest_type" | "checkout" | "platform">;
+
+/** Conta valores para os seletores de filtro (só mostra opções que existem). */
+function facet(rows: FacetRow[], pick: (r: FacetRow) => (string | null)[], label: (v: string) => string = (v) => v) {
+  const m = new Map<string, number>();
+  for (const r of rows) for (const v of new Set(pick(r))) if (v) m.set(v, (m.get(v) ?? 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => ({ value, label: label(value), count }));
+}
+
 export default async function Ranking({ searchParams }: { searchParams: Search }) {
   const f = parseFilters(await searchParams);
   const client = db();
 
-  const [{ offers, error, total }, withWeak, { data: kws }, { data: allKw }, { data: lastRun }, { count: totalAll }, { count: growingAll }] = await Promise.all([
+  const [{ offers, error, total }, withWeak, { data: kws }, { data: facetRows }, { data: lastRun }, { count: totalAll }, { count: growingAll }] = await Promise.all([
     queryOffers(client, f),
     countAll(client, f),
     client.from("keywords").select("term").eq("active", true).order("term"),
-    client.from("offer_ranking").select("keywords").limit(2000),
-    client.from("runs").select("source, ok, finished_at").order("id", { ascending: false }).limit(1),
-    client.from("offer_ranking").select("offer_key", { count: "exact", head: true }),
+    client.from("offer_ranking").select("keywords, niche, kind, dest_type, checkout, platform").eq("discarded", false).or(STRONG_SIGNAL).limit(2000),
+    client.from("runs").select("source, ok, finished_at").eq("source", "meta").order("id", { ascending: false }).limit(1),
+    client.from("offer_ranking").select("offer_key", { count: "exact", head: true }).eq("discarded", false).or(STRONG_SIGNAL),
     client.from("offer_ranking").select("offer_key", { count: "exact", head: true }).gt("copies_growth", 0),
   ]);
 
@@ -44,18 +54,24 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
     return (
       <Terminal
         title="erro.log"
-        lines={[<span key="e" className="t-bad">Erro ao ler o banco: {error.message}</span>, <C key="c">{"// confira SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY na Vercel"}</C>]}
+        lines={[<span key="e" className="t-bad">Erro ao ler o banco: {error.message}</span>, <C key="c">{"// confira SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY na Vercel; se for coluna nova, rode a migração do Supabase"}</C>]}
       />
     );
   }
 
-  // quantas ofertas cada palavra-chave trouxe (para os botões de filtro)
+  const rows = (facetRows ?? []) as FacetRow[];
   const counts = new Map<string, number>();
-  for (const r of (allKw ?? []) as { keywords: string[] }[]) for (const k of r.keywords ?? []) counts.set(k, (counts.get(k) ?? 0) + 1);
+  for (const r of rows) for (const k of r.keywords ?? []) counts.set(k, (counts.get(k) ?? 0) + 1);
   const keywordChips = ((kws ?? []) as { term: string }[])
     .map((k) => ({ term: k.term, count: counts.get(k.term) ?? 0 }))
     .filter((k) => k.count > 0 || k.term === f.kw) // palavra sem oferta não vira botão
     .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
+  const facets = {
+    nicho: facet(rows, (r) => [r.niche]),
+    tipo: facet(rows, (r) => [r.kind], (v) => KIND_LABEL[v] ?? v),
+    destino: facet(rows, (r) => [r.dest_type], (v) => DEST_LABEL[v as DestType] ?? v),
+    checkout: facet(rows, (r) => [r.checkout, r.platform]),
+  };
 
   const run = lastRun?.[0] as { source: string; ok: boolean | null; finished_at: string } | undefined;
   const topScore = Math.max(...offers.map((o) => o.score), 1);
@@ -82,11 +98,11 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
             <>  <K>crescendo_7d</K>: <N>{growingAll ?? 0}</N>,</>,
             <>  <K>palavras_chave</K>: <N>{kws?.length ?? 0}</N>,</>,
             run ? (
-              <>  <K>ultima_coleta</K>: <S>{fmtRun(run.finished_at)}</S>, <K>fonte</K>: <S>{run.source}</S>,</>
+              <>  <K>ultima_coleta</K>: <S>{fmtRun(run.finished_at)}</S>,</>
             ) : (
               <>  <K>ultima_coleta</K>: <span className="t-com">null</span>,</>
             ),
-            <>  <K>status</K>: {run?.ok === false ? <span className="t-bad">&quot;com falha&quot;</span> : <span className="t-ok">&quot;online&quot;</span>}</>,
+            <>  <K>status</K>: {run?.ok === false ? <Link href="/status" className="t-bad">&quot;com falha&quot;</Link> : <span className="t-ok">&quot;online&quot;</span>}</>,
             <>{"}"}</>,
             <><span className="t-prompt">$</span> <Cursor /></>,
           ]}
@@ -94,7 +110,7 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
       </section>
 
       <Suspense>
-        <FilterBar keywords={keywordChips} shown={offers.length} total={total} hiddenWeak={withWeak === null ? 0 : withWeak - total} exportHref={exportHref} />
+        <FilterBar keywords={keywordChips} facets={facets} shown={offers.length} total={total} hiddenWeak={withWeak === null ? 0 : withWeak - total} exportHref={exportHref} />
       </Suspense>
 
       <div className="grid">
@@ -110,57 +126,90 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
               <SortTh f={f} k="paginas" label="paginas" num title="Páginas do Facebook rodando a mesma oferta" />
               <SortTh f={f} k="google" label="google" num title="Anúncios no Centro de Transparência do Google" />
               <SortTh f={f} k="desde" label="desde" title="Anúncio ativo mais antigo" />
-              <th>pagina_de_vendas</th>
+              <SortTh f={f} k="preco" label="pagina_de_vendas" title="Ordena pelo menor preço encontrado na página" />
             </tr>
           </thead>
           <tbody>
-            {offers.map((o, i) => (
-              <tr key={o.offer_key}>
-                <td className="gutter">{i + 1}</td>
-                <td className="offer-cell">
-                  <Thumb src={o.thumb_url} alt={`Criativo de ${o.advertiser}`} />
-                  <div className="offer-main">
-                    <Link className="offer-name" href={`/oferta/${encodeURIComponent(o.offer_key)}`}>{o.advertiser}</Link>
-                    {o.domain && <span className="domain">{o.domain}</span>}
-                    {o.pages > 1 && <div className="also">também em {o.advertisers.slice(1, 4).join(", ")}{o.advertisers.length > 4 ? "…" : ""}</div>}
-                    {o.sample_text && <div className="snippet">{o.sample_text.slice(0, 120)}</div>}
-                    <div className="tags">{o.keywords.map((k) => (
-                      <Link key={k} className={`tag-kw${f.kw === k ? " on" : ""}`} href={hrefWith(f, { kw: f.kw === k ? "" : k, limit: PAGE_SIZE })} scroll={false}>{k}</Link>
-                    ))}</div>
-                  </div>
-                </td>
-                <td className="n">
-                  <div className="score">
-                    <b>{o.score}</b>
-                    <span className="meter" aria-hidden="true"><i style={{ width: `${Math.round((o.score / topScore) * 100)}%` }} /></span>
-                  </div>
-                </td>
-                <td className="n">{o.cards}</td>
-                <td className="n">{o.copies}</td>
-                <td className="n">
-                  {o.copies_7d === null ? <span className="delta new">novo</span>
-                    : o.copies_growth > 0 ? <span className="delta up">▲ {o.copies_growth}</span>
-                    : <span className="delta dim">{o.copies_growth}</span>}
-                </td>
-                <td className="n">{o.pages}</td>
-                <td className="n">{o.google_ads ?? <span className="dim">—</span>}</td>
-                <td className="mono date">{fmtDate(o.oldest_start)}</td>
-                <td className="landing">
-                  {o.landing_url ? (
-                    <span className="landing-wrap">
-                      <a href={o.landing_url} target="_blank" rel="noreferrer noopener" title={o.landing_url}>{shortUrl(o.landing_url, 30)}</a>
-                      <CopyButton text={o.landing_url} />
-                    </span>
-                  ) : (
-                    <span className="dim mono">sem link</span>
-                  )}
-                  <div className="sublinks">
-                    {o.page_url && <a href={o.page_url} target="_blank" rel="noreferrer" title="Página do anunciante no Facebook">página fb ↗</a>}
-                    <a href={libraryLink(o.domain ?? o.advertiser)} target="_blank" rel="noreferrer" title="Anúncios ativos na Biblioteca da Meta">biblioteca ↗</a>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {offers.map((o, i) => {
+              const price = priceRange(o.price_min, o.price_max);
+              const meta = [o.niche, o.kind ? KIND_LABEL[o.kind] ?? o.kind : null].filter(Boolean);
+              return (
+                <tr key={o.offer_key} className={o.status ? `st-${o.status}` : undefined}>
+                  <td className="gutter">
+                    {i + 1}
+                    <form action={toggleFavorite}>
+                      <input type="hidden" name="key" value={o.offer_key} />
+                      <input type="hidden" name="current" value={o.status ?? ""} />
+                      <button
+                        className={`star${o.status ? " on" : ""}`}
+                        title={o.status && o.status !== "favorita" ? `No funil: ${o.status}` : o.status ? "Tirar dos favoritos" : "Favoritar"}
+                        aria-label={o.status === "favorita" ? "Tirar dos favoritos" : "Favoritar"}
+                        aria-pressed={!!o.status}
+                      >
+                        {o.status ? "★" : "☆"}
+                      </button>
+                    </form>
+                  </td>
+                  <td className="offer-cell">
+                    <Thumb src={creativeSrc(o.thumb_path, o.thumb_url)} alt={`Criativo de ${o.advertiser}`} />
+                    <div className="offer-main">
+                      <Link className="offer-name" href={`/oferta/${encodeURIComponent(o.offer_key)}`}>{o.advertiser}</Link>
+                      {o.domain && <span className="domain">{o.domain}</span>}
+                      {(meta.length > 0 || o.risk === "alto" || (o.status && o.status !== "favorita")) && (
+                        <div className="meta-line">
+                          {meta.map((m) => <span key={m}>{m}</span>)}
+                          {o.risk === "alto" && <span className="risk" title={o.risk_reason ?? "Promessa arriscada para as políticas de anúncio"}>⚠ risco alto</span>}
+                          {o.status && o.status !== "favorita" && <span className="pill">{o.status}</span>}
+                        </div>
+                      )}
+                      {o.promise ? <div className="snippet promise">{o.promise}</div> : o.sample_text && <div className="snippet">{o.sample_text.slice(0, 120)}</div>}
+                      {o.pages > 1 && <div className="also">também em {o.advertisers.slice(1, 4).join(", ")}{o.advertisers.length > 4 ? "…" : ""}</div>}
+                      <div className="tags">{o.keywords.map((k) => (
+                        <Link key={k} className={`tag-kw${f.kw === k ? " on" : ""}`} href={hrefWith(f, { kw: f.kw === k ? "" : k, limit: PAGE_SIZE })} scroll={false}>{k}</Link>
+                      ))}</div>
+                    </div>
+                  </td>
+                  <td className="n">
+                    <div className="score">
+                      <b>{o.score}</b>
+                      <span className="meter" aria-hidden="true"><i style={{ width: `${Math.round((o.score / topScore) * 100)}%` }} /></span>
+                    </div>
+                  </td>
+                  <td className="n">{o.cards}</td>
+                  <td className="n">{o.copies}</td>
+                  <td className="n">
+                    {o.copies_7d === null ? <span className="delta new">novo</span>
+                      : o.copies_growth > 0 ? <span className="delta up">▲ {o.copies_growth}</span>
+                      : <span className="delta dim">{o.copies_growth}</span>}
+                  </td>
+                  <td className="n">{o.pages}</td>
+                  <td className="n">{o.google_ads ?? <span className="dim">—</span>}</td>
+                  <td className="mono date">{fmtDate(o.oldest_start)}</td>
+                  <td className="landing">
+                    {o.landing_url ? (
+                      <span className="landing-wrap">
+                        <a href={o.landing_url} target="_blank" rel="noreferrer noopener" title={o.landing_url}>{shortUrl(o.landing_url, 30)}</a>
+                        <CopyButton text={o.landing_url} />
+                      </span>
+                    ) : (
+                      <span className="dim mono">{o.dest_type && o.dest_type !== "site" ? `via ${DEST_LABEL[o.dest_type]}` : "sem link"}</span>
+                    )}
+                    {(price || o.checkout || o.platform || o.cod) && (
+                      <div className="xray">
+                        {price && <b>{price}</b>}
+                        {(o.checkout || o.platform) && <span>{o.checkout ?? o.platform}</span>}
+                        {o.cod && <span className="cod" title="Pagamento na entrega">COD</span>}
+                        {o.has_vsl && <span title="Página com vídeo de vendas">VSL</span>}
+                      </div>
+                    )}
+                    <div className="sublinks">
+                      {o.page_url && <a href={o.page_url} target="_blank" rel="noreferrer" title="Página do anunciante no Facebook">página fb ↗</a>}
+                      <a href={libraryLink(o.domain ?? o.advertiser)} target="_blank" rel="noreferrer" title="Anúncios ativos na Biblioteca da Meta">biblioteca ↗</a>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {offers.length === 0 && (
