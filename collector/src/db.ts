@@ -13,8 +13,27 @@ export function getDb(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   assertServiceKey(key);
-  return createClient(url, key, { auth: { persistSession: false } });
+  return createClient(url, key, { auth: { persistSession: false }, global: { fetch: safeFetch } });
 }
+
+/** Troca metades soltas de emoji (texto cortado no meio) por "\uFFFD"; o Postgres recusa esse JSON. */
+export function wellFormed<T>(v: T): T {
+  if (typeof v === "string") return v.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD") as T;
+  if (Array.isArray(v)) return v.map(wellFormed) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, wellFormed(x)])) as T;
+  return v;
+}
+
+const safeFetch: typeof fetch = (input, init) => {
+  if (typeof init?.body === "string" && /\\u[dD][89a-fA-F]/.test(init.body)) {
+    try {
+      init = { ...init, body: JSON.stringify(wellFormed(JSON.parse(init.body))) };
+    } catch {
+      /* corpo não é JSON: segue como está */
+    }
+  }
+  return fetch(input, init);
+};
 
 /** Garante que a chave é a secreta (service role); a pública não consegue gravar com o RLS ligado. */
 export function assertServiceKey(key: string) {

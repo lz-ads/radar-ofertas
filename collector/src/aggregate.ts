@@ -133,7 +133,7 @@ export function buildSnapshots(ads: AdWithMeta[]): OfferSnapshot[] {
       pages: advertisers.length,
       oldestStart: starts[0] ?? null,
       keywords: [...new Set(list.flatMap((a) => a.keywords))],
-      sampleText: top.body.slice(0, 300),
+      sampleText: Array.from(top.body).slice(0, 300).join(""),
       landingUrl: landing,
       pageUrl,
       thumbUrl: thumb,

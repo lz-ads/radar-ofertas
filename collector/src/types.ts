@@ -29,6 +29,8 @@ export interface KeywordResult {
   keyword: string;
   totalResults: string | null; // ex.: "~6.900 resultados"
   ads: MetaAd[];
+  /** Diagnóstico da rolagem: cards no início, no fim, rodadas e o fim do texto da página. */
+  scroll?: { start: number; end: number; rounds: number; tail: string };
 }
 
 /**

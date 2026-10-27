@@ -50,6 +50,8 @@ async function runMeta(client: ReturnType<typeof db.getDb>, day: string) {
         const r = await source.searchKeyword(term);
         console.log(`[meta] "${term}": ${r.ads.length} anúncios (${r.totalResults ?? "?"})`);
         perKeyword.push(r.ads.length);
+        if (r.scroll && perKeyword.length <= 2)
+          notes.push(`Meta rolagem "${term}": ${r.scroll.start} → ${r.scroll.end} cards em ${r.scroll.rounds} rolagens. Fim da página: …${r.scroll.tail}`);
         if (r.ads.length) results.push(r);
         else errors.push(`"${term}": nenhum anúncio lido`);
       } catch (e) {

@@ -46,7 +46,9 @@ export class MetaBrowserSource implements MetaAdSource {
     const countCards = () =>
       page.evaluate(() => (document.body?.innerText.match(/Identificação da biblioteca/g) || []).length).catch(() => 0);
     let last = await countCards();
+    const start = last;
     let stale = 0;
+    let rounds = 0;
     for (let i = 0; i < maxScrolls && last < maxCards && stale < 3; i++) {
       await page.mouse.wheel(0, 4000).catch(() => {});
       await page
@@ -63,6 +65,7 @@ export class MetaBrowserSource implements MetaAdSource {
           now = await countCards();
         }
       }
+      rounds++;
       stale = now > last ? 0 : stale + 1;
       last = now;
     }
@@ -89,7 +92,8 @@ export class MetaBrowserSource implements MetaAdSource {
         if (host && !isGenericDomain(host)) ad.domain = host;
       }
     }
-    return { keyword: term, totalResults: total, ads };
+    const tail = text.replace(/\s+/g, " ").trim().slice(-240);
+    return { keyword: term, totalResults: total, ads, scroll: { start, end: last, rounds, tail } };
   }
 
   async close() {

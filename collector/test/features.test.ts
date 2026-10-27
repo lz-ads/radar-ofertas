@@ -163,3 +163,12 @@ test("item 7: alertas sem repetição e sem enxurrada na primeira vez", () => {
   assert.match(msg, /🔥 <b>C<\/b> \+4 cópias/);
   assert.match(msg, /\/oferta\/c/);
 });
+
+test("wellFormed troca metade solta de emoji (Postgres recusa)", async () => {
+  const { wellFormed } = await import("../src/db.js");
+  const cut = "Oferta 🔥".slice(0, 8); // corta o emoji no meio
+  const out = wellFormed({ a: cut, b: ["ok 🔥"], n: 3 });
+  assert.equal(out.a, "Oferta �");
+  assert.equal(out.b[0], "ok 🔥");
+  assert.equal(out.n, 3);
+});
