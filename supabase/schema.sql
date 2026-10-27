@@ -29,6 +29,19 @@ insert into ignored_advertisers (name) values
   ('Mercado Pago'), ('PicPay'), ('Ton'), ('Petlove'), ('L''Oréal Paris')
 on conflict (name) do nothing;
 
+-- Grandes marcas e varejistas vistos nas primeiras coletas (nomes de página ou domínios)
+insert into ignored_advertisers (name) values
+  ('Buscofem'), ('Neosaldina'), ('Doril'), ('Advil Brasil'), ('Calminex'), ('Spidufen Brasil'),
+  ('La Roche-Posay'), ('Nestlé Nutre'), ('Receitas Nestlé'), ('Quaker Brasil'), ('Doritos'),
+  ('Britânia Eletrodomésticos'), ('Jeep | Brasil'), ('Polishop'), ('Lojas Torra'), ('Netshoes'),
+  ('Airbnb'), ('Decolar'), ('Hotels.com'), ('CNA'), ('UNIP'), ('Alpecin Brasil'), ('HOPE Underwear'),
+  ('SEPHORA'), ('AREZZO'), ('Ray-Ban'), ('Hering'), ('Lenovo Brasil'), ('JBL'), ('Beleza na Web'),
+  ('Life by Vivara'), ('Integralmedica Sports Nutrition'), ('Gran Cursos Online - Concursos Públicos'),
+  ('Profuse'), ('Bigfral'), ('TENA Brasil'), ('SAZÓN Brasil'), ('Qualy'), ('Uber'), ('99Food'),
+  ('hypera.com.br'), ('drogaraia.com.br'), ('drogasil.com.br'), ('mercadolivre.com.br'),
+  ('shopee.com.br'), ('amazon.com.br'), ('magazineluiza.com.br'), ('paodeacucar.com'), ('loreal-paris.com.br')
+on conflict (name) do nothing;
+
 -- Cada anúncio visto (um registro por ID da biblioteca)
 create table if not exists ads (
   library_id   text primary key,
@@ -39,6 +52,10 @@ create table if not exists ads (
   start_date   date,
   copies       int  not null default 1,
   keywords     text[] not null default '{}',
+  page_url     text,          -- página do anunciante no Facebook
+  landing_url  text,          -- página de destino, sem parâmetros de rastreio
+  thumb_url    text,          -- imagem do criativo (o link do Facebook expira em alguns dias)
+  media_type   text,          -- image | video
   first_seen   timestamptz not null default now(),
   last_seen    timestamptz not null default now()
 );
@@ -57,6 +74,9 @@ create table if not exists offer_snapshots (
   oldest_start  date,
   keywords      text[] not null default '{}',
   sample_text   text,
+  landing_url   text,
+  page_url      text,
+  thumb_url     text,
   primary key (day, offer_key)
 );
 create index if not exists offer_snapshots_key_idx on offer_snapshots (offer_key, day desc);
@@ -91,6 +111,15 @@ create table if not exists runs (
   message     text
 );
 
+-- Atualização de instalações antigas (sem efeito em instalação nova)
+alter table ads             add column if not exists page_url    text;
+alter table ads             add column if not exists landing_url text;
+alter table ads             add column if not exists thumb_url   text;
+alter table ads             add column if not exists media_type  text;
+alter table offer_snapshots add column if not exists landing_url text;
+alter table offer_snapshots add column if not exists page_url    text;
+alter table offer_snapshots add column if not exists thumb_url   text;
+
 -- Ranking: última foto de cada oferta + crescimento contra ~7 dias atrás + Google
 -- security_invoker: a view respeita o RLS das tabelas (não fica exposta pela chave pública)
 create or replace view offer_ranking with (security_invoker = true) as
@@ -123,10 +152,20 @@ select
     + 5 * greatest(l.pages - 1, 0)
     + case when coalesce(g.google_ads,0) >= 100 then 10 when coalesce(g.google_ads,0) >= 10 then 5 else 0 end
     + 2 * greatest(l.copies - coalesce(w.copies_7d, l.copies), 0)
-  ) as score
+  ) as score,
+  l.landing_url, l.page_url, l.thumb_url
 from latest l
 left join week_ago w using (offer_key)
-left join g on g.domain = l.domain;
+left join g on g.domain = l.domain
+-- ignorados valem na hora (sem esperar a próxima coleta): nome, parceria "X com Marca" ou domínio
+where not exists (
+  select 1 from ignored_advertisers i
+  where lower(i.name) = lower(l.advertiser)
+     or lower(l.advertiser) like '% com ' || lower(i.name)
+     or lower(l.advertiser) like lower(i.name) || ' com %'
+     or (position('.' in i.name) > 0 and position(' ' in i.name) = 0
+         and (lower(l.domain) = lower(i.name) or lower(l.domain) like '%.' || lower(i.name)))
+);
 
 -- Segurança: só o service role (robô e painel no servidor) acessa as tabelas
 alter table keywords            enable row level security;

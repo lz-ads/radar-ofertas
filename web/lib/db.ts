@@ -28,6 +28,20 @@ export interface OfferRow {
   google_ads: number | null;
   first_seen: string;
   score: number;
+  landing_url: string | null;
+  page_url: string | null;
+  thumb_url: string | null;
+}
+
+/** "https://www.loja.com.br/products/kit-3?variant=1" -> "loja.com.br/products/kit-3" */
+export function shortUrl(url: string, max = 38): string {
+  try {
+    const u = new URL(url);
+    const s = u.hostname.replace(/^www\./, "") + (u.pathname === "/" ? "" : u.pathname.replace(/\/$/, ""));
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  } catch {
+    return url.slice(0, max);
+  }
 }
 
 export const fmtDate = (d: string | null) => (d ? d.split("-").reverse().join("/") : "—");

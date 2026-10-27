@@ -6,6 +6,18 @@ export interface MetaAd {
   body: string;
   startDate: string | null; // ISO yyyy-mm-dd
   copies: number;           // "X anúncios usam esse criativo e esse texto"
+  pageUrl?: string | null;    // página do anunciante no Facebook
+  landingUrl?: string | null; // página de destino (vendas), sem parâmetros de rastreio
+  thumbUrl?: string | null;   // imagem do criativo (ou capa do vídeo)
+  mediaType?: "image" | "video" | null;
+}
+
+/** Links e mídia lidos do HTML de cada card, por ID da biblioteca. */
+export interface AdLinks {
+  pageUrl: string | null;
+  landingUrl: string | null;
+  thumbUrl: string | null;
+  mediaType: "image" | "video" | null;
 }
 
 /** Resultado de uma busca por palavra-chave. */
@@ -50,4 +62,7 @@ export interface OfferSnapshot {
   oldestStart: string | null;
   keywords: string[];
   sampleText: string;
+  landingUrl: string | null;
+  pageUrl: string | null;
+  thumbUrl: string | null;
 }

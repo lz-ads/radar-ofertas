@@ -103,6 +103,32 @@ test("ranking do Reclame Aqui com variações de layout", () => {
   assert.equal(rows[1].reputation, null);
 });
 
+test("limpa o link de destino e a página do Facebook", async () => {
+  const { cleanLandingUrl, cleanPageUrl, hostOf } = await import("../src/parse/links.js");
+  const wrapped = "https://l.facebook.com/l.php?u=" + encodeURIComponent("https://menoaliv.com.br/products/meno-aliv-tratamento-30-dias?utm_content=Facebook_UA&utm_source=facebook&variant=4988108229866&fbclid=abc") + "&h=AUAz";
+  assert.equal(cleanLandingUrl(wrapped), "https://menoaliv.com.br/products/meno-aliv-tratamento-30-dias?variant=4988108229866");
+  assert.equal(cleanLandingUrl("https://l.facebook.com/l.php?u=" + encodeURIComponent("https://constlivre.com.br/") + "&h=x"), "https://constlivre.com.br/");
+  assert.equal(cleanLandingUrl("https://www.facebook.com/somepage/"), null);
+  assert.equal(cleanLandingUrl("javascript:alert(1)"), null);
+  assert.equal(cleanLandingUrl(null), null);
+  assert.equal(cleanPageUrl("https://www.facebook.com/61558675869659/"), "https://www.facebook.com/61558675869659/");
+  assert.equal(cleanPageUrl("https://www.facebook.com/jujusalimeni/?ref=x"), "https://www.facebook.com/jujusalimeni/");
+  assert.equal(cleanPageUrl("https://www.facebook.com/ads/library/?id=1"), null);
+  assert.equal(hostOf("https://www.denavita.com.br/products/x"), "denavita.com.br");
+});
+
+test("a foto da oferta leva o link de destino, a página e a imagem", () => {
+  const base = { advertiser: "ConstLivre", domain: "constlivre.com.br", body: "x", startDate: "2026-07-20" };
+  const ads = mergeAds([{ keyword: "k", totalResults: null, ads: [
+    { ...base, libraryId: "1", copies: 2, landingUrl: null, pageUrl: "https://www.facebook.com/a/", thumbUrl: "https://img/1" },
+    { ...base, libraryId: "2", copies: 9, landingUrl: "https://constlivre.com.br/", pageUrl: "https://www.facebook.com/a/", thumbUrl: "https://img/2" },
+  ] }], new Set());
+  const [s] = buildSnapshots(ads);
+  assert.equal(s.landingUrl, "https://constlivre.com.br/");
+  assert.equal(s.pageUrl, "https://www.facebook.com/a/");
+  assert.equal(s.thumbUrl, "https://img/2");
+});
+
 test("recusa a chave pública do Supabase", async () => {
   const { assertServiceKey } = await import("../src/db.js");
   assert.throws(() => assertServiceKey("sb_publishable_abc"), /PÚBLICA/);
@@ -110,4 +136,15 @@ test("recusa a chave pública do Supabase", async () => {
   assert.throws(() => assertServiceKey(jwt("anon")), /PÚBLICA/);
   assert.doesNotThrow(() => assertServiceKey(jwt("service_role")));
   assert.doesNotThrow(() => assertServiceKey("sb_secret_abc"));
+});
+
+test("ignora marcas por nome, parceria 'com' e domínio", async () => {
+  const { isIgnored } = await import("../src/aggregate.js");
+  const ign = new Set(["shopee", "l'oréal paris", "hypera.com.br"]);
+  assert.equal(isIgnored({ advertiser: "Shopee", domain: null }, ign), true);
+  assert.equal(isIgnored({ advertiser: "Taís Araujo com L'Oréal Paris", domain: null }, ign), true);
+  assert.equal(isIgnored({ advertiser: "Buscofem", domain: "www.hypera.com.br" }, ign), true);
+  assert.equal(isIgnored({ advertiser: "Buscofem", domain: "hypera.com.br" }, ign), true);
+  assert.equal(isIgnored({ advertiser: "ConstLivre", domain: "constlivre.com.br" }, ign), false);
+  assert.equal(isIgnored({ advertiser: "Comer Sem Culpa 1.0", domain: null }, ign), false);
 });

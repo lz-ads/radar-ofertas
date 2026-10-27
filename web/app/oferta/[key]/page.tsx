@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db, fmtDate, libraryLink, type OfferRow } from "@/lib/db";
+import { db, fmtDate, libraryLink, shortUrl, type OfferRow } from "@/lib/db";
+import { CopyButton, Thumb } from "../../bits";
 
 export const dynamic = "force-dynamic";
 
 interface Snap { day: string; cards: number; copies: number; pages: number }
-interface Ad { library_id: string; advertiser: string; body: string | null; start_date: string | null; copies: number; last_seen: string; domain: string | null }
+interface Ad { library_id: string; advertiser: string; body: string | null; start_date: string | null; copies: number; last_seen: string; domain: string | null; landing_url: string | null; page_url: string | null; thumb_url: string | null; media_type: string | null }
 
 function Chart({ data }: { data: Snap[] }) {
   if (data.length < 2) {
@@ -46,7 +47,7 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
   const [{ data: offer }, { data: snaps }, { data: ads }] = await Promise.all([
     client.from("offer_ranking").select("*").eq("offer_key", key).maybeSingle(),
     client.from("offer_snapshots").select("day, cards, copies, pages").eq("offer_key", key).order("day").limit(90),
-    client.from("ads").select("library_id, advertiser, body, start_date, copies, last_seen, domain").eq("offer_key", key)
+    client.from("ads").select("library_id, advertiser, body, start_date, copies, last_seen, domain, landing_url, page_url, thumb_url, media_type").eq("offer_key", key)
       .order("copies", { ascending: false }).limit(60),
   ]);
   if (!offer && !snaps?.length) notFound();
@@ -80,7 +81,17 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
         </section>
         <section className="panel">
           <h2>Onde espionar</h2>
+          {o?.landing_url && (
+            <div className="landing-box">
+              <span className="dim mono">pagina_de_vendas</span>
+              <span className="landing-wrap">
+                <a href={o.landing_url} target="_blank" rel="noreferrer noopener" title={o.landing_url}>{shortUrl(o.landing_url, 60)}</a>
+                <CopyButton text={o.landing_url} />
+              </span>
+            </div>
+          )}
           <ul className="links">
+            {o?.page_url && <li><a href={o.page_url} target="_blank" rel="noreferrer">Página no Facebook ↗</a></li>}
             <li><a href={libraryLink(o?.domain ?? name)} target="_blank" rel="noreferrer">Biblioteca da Meta ↗</a></li>
             {o?.domain && <li><a href={`https://adstransparency.google.com/?region=BR&domain=${o.domain}`} target="_blank" rel="noreferrer">Transparência do Google ↗</a></li>}
             {o?.domain && <li><a href={`https://www.reclameaqui.com.br/busca/?q=${encodeURIComponent(o.domain.split(".")[0])}`} target="_blank" rel="noreferrer">Reclame Aqui ↗</a></li>}
@@ -93,13 +104,17 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
       <section className="panel">
         {list.map((a) => (
           <article className="ad" key={a.library_id}>
+            <Thumb src={a.thumb_url} alt={`Criativo de ${a.advertiser}`} video={a.media_type === "video"} />
+            <div className="ad-body">
             <div className="ad-head">
               <b>{a.advertiser}</b>
               <span className="mono">desde {fmtDate(a.start_date)}</span>
               <span className="mono">{a.copies} {a.copies === 1 ? "cópia" : "cópias"}</span>
               <a className="ext-link" href={`https://www.facebook.com/ads/library/?id=${a.library_id}`} target="_blank" rel="noreferrer">ver anúncio ↗</a>
+              {a.landing_url && <a className="ext-link" href={a.landing_url} target="_blank" rel="noreferrer noopener" title={a.landing_url}>{shortUrl(a.landing_url, 34)} ↗</a>}
             </div>
             {a.body && <p>{a.body}</p>}
+            </div>
           </article>
         ))}
         {!list.length && <p className="muted" style={{ margin: 0 }}>Nenhum anúncio salvo para esta oferta.</p>}

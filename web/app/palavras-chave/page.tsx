@@ -65,10 +65,10 @@ export default async function PalavrasChave() {
         <section className="panel">
           <h2>Anunciantes ignorados</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            Marketplaces e grandes marcas não são ofertas para modelar. Escreva o nome exatamente como aparece na página do Facebook.
+            Marketplaces e grandes marcas não são ofertas para modelar. Escreva o nome da página como aparece no Facebook ou um domínio (ex.: hypera.com.br). Parcerias do tipo &ldquo;Fulana com Marca&rdquo; também são ignoradas. Vale na hora para o ranking.
           </p>
           <form action={addIgnored} className="inline-form">
-            <input className="field" name="name" placeholder="Nome da página" required aria-label="Anunciante a ignorar" />
+            <input className="field" name="name" placeholder="Nome da página ou domínio" required aria-label="Anunciante a ignorar" />
             <button className="btn">Ignorar</button>
           </form>
           <div className="chips">{(ign ?? []).map((i: { name: string }) => <span key={i.name} className="tag-kw">{i.name}</span>)}</div>

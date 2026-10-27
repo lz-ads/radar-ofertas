@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from "playwright";
-import { parseMetaLibraryText } from "../parse/meta.js";
+import { CARD_LINKS_SCRIPT, cleanLandingUrl, cleanPageUrl, hostOf, type CardLinks } from "../parse/links.js";
+import { isGenericDomain, parseMetaLibraryText } from "../parse/meta.js";
 import type { KeywordResult, MetaAdSource } from "../types.js";
 import { jitter, newContext, sleep } from "./browser.js";
 
@@ -53,6 +54,22 @@ export class MetaBrowserSource implements MetaAdSource {
       throw new Error("A Meta pediu login para a busca — o IP do robô pode ter sido bloqueado.");
     }
     const { total, ads } = parseMetaLibraryText(text);
+
+    // links e mídia vêm do HTML (o texto não tem os endereços)
+    const links = ((await page.evaluate(CARD_LINKS_SCRIPT).catch(() => ({}))) ?? {}) as CardLinks;
+    for (const ad of ads) {
+      const l = links[ad.libraryId];
+      if (!l) continue;
+      ad.pageUrl = cleanPageUrl(l.page);
+      ad.landingUrl = cleanLandingUrl(l.landing);
+      ad.thumbUrl = l.thumb;
+      ad.mediaType = l.media;
+      // sem domínio no texto: usa o do link de destino
+      if (!ad.domain || isGenericDomain(ad.domain)) {
+        const host = hostOf(ad.landingUrl);
+        if (host && !isGenericDomain(host)) ad.domain = host;
+      }
+    }
     return { keyword: term, totalResults: total, ads };
   }
 
