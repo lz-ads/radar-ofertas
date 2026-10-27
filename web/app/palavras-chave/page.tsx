@@ -29,44 +29,51 @@ export default async function PalavrasChave() {
     client.from("keywords").select("id, term, active").order("term"),
     client.from("ignored_advertisers").select("name").order("name"),
   ]);
+  const list = (kws ?? []) as { id: number; term: string; active: boolean }[];
+  const active = list.filter((k) => k.active).length;
 
   return (
-    <div className="grid2">
-      <div className="panel">
-        <h1>Palavras-chave</h1>
-        <p className="muted">O robô busca cada frase exata na Biblioteca da Meta (Brasil, anúncios ativos, mais vistos primeiro).</p>
-        <form action={addKeyword} className="filters">
-          <input name="term" placeholder="ex.: dor no joelho" required />
-          <button>Adicionar</button>
-        </form>
-        <table>
-          <tbody>
-            {(kws ?? []).map((k: { id: number; term: string; active: boolean }) => (
-              <tr key={k.id}>
-                <td className={k.active ? "" : "muted"}>{k.term}</td>
-                <td style={{ textAlign: "right" }}>
-                  <form action={toggleKeyword}>
-                    <input type="hidden" name="id" value={k.id} />
-                    <input type="hidden" name="active" value={String(!k.active)} />
-                    <button style={k.active ? { background: "transparent", color: "var(--muted)" } : undefined}>
-                      {k.active ? "Pausar" : "Ativar"}
-                    </button>
-                  </form>
-                </td>
-              </tr>
+    <>
+      <p className="comment">{"// o que o robô pesquisa a cada coleta"}</p>
+      <h1>Palavras-chave</h1>
+      <p className="lede" style={{ marginBottom: 32 }}>
+        Cada frase é buscada exatamente assim na Biblioteca da Meta, no Brasil, só entre anúncios ativos e começando pelos mais vistos.
+        {" "}{active} de {list.length} estão ativas.
+      </p>
+
+      <div className="two-col">
+        <section className="panel">
+          <h2>Buscas</h2>
+          <form action={addKeyword} className="inline-form">
+            <input className="field" name="term" placeholder="ex.: dor no joelho" required aria-label="Nova palavra-chave" />
+            <button className="btn">Adicionar</button>
+          </form>
+          <ul className="kw-list">
+            {list.map((k) => (
+              <li key={k.id}>
+                <span className={`mono ${k.active ? "" : "off"}`}>&quot;{k.term}&quot;</span>
+                <form action={toggleKeyword}>
+                  <input type="hidden" name="id" value={k.id} />
+                  <input type="hidden" name="active" value={String(!k.active)} />
+                  <button className={k.active ? "btn ghost" : "btn"}>{k.active ? "Pausar" : "Ativar"}</button>
+                </form>
+              </li>
             ))}
-          </tbody>
-        </table>
+          </ul>
+        </section>
+
+        <section className="panel">
+          <h2>Anunciantes ignorados</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Marketplaces e grandes marcas não são ofertas para modelar. Escreva o nome exatamente como aparece na página do Facebook.
+          </p>
+          <form action={addIgnored} className="inline-form">
+            <input className="field" name="name" placeholder="Nome da página" required aria-label="Anunciante a ignorar" />
+            <button className="btn">Ignorar</button>
+          </form>
+          <div className="chips">{(ign ?? []).map((i: { name: string }) => <span key={i.name} className="tag-kw">{i.name}</span>)}</div>
+        </section>
       </div>
-      <div className="panel">
-        <h3 style={{ marginTop: 0 }}>Anunciantes ignorados</h3>
-        <p className="muted">Marketplaces e grandes marcas que não são ofertas para modelar. O nome tem que ser igual ao da página no Facebook.</p>
-        <form action={addIgnored} className="filters">
-          <input name="name" placeholder="Nome da página" required />
-          <button>Ignorar</button>
-        </form>
-        <p>{(ign ?? []).map((i: { name: string }) => <span key={i.name} className="chip">{i.name}</span>)}</p>
-      </div>
-    </div>
+    </>
   );
 }

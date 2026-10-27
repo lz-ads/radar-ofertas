@@ -55,6 +55,14 @@ npm test                       # testes do leitor
 HEADFUL=1 npm run collect:meta # abre o navegador; sem as variáveis do Supabase salva em ./out
 ```
 
+## Modo demonstração
+
+Com `RADAR_DEMO=1`, o painel usa dados de exemplo em vez do Supabase. Serve para testar o visual localmente ou mostrar a alguém sem expor o banco:
+
+```bash
+cd web && npm install && RADAR_DEMO=1 npm run dev
+```
+
 ## Ajustes
 
 - **Palavras-chave e anunciantes ignorados:** pela página *Palavras-chave* do painel.

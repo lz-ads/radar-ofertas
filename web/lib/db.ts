@@ -1,7 +1,9 @@
 import "server-only";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { demoClient } from "./demo";
 
-export function db() {
+export function db(): SupabaseClient {
+  if (process.env.RADAR_DEMO === "1") return demoClient as unknown as SupabaseClient;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nas variáveis da Vercel.");
