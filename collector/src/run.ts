@@ -171,7 +171,7 @@ async function runAi(client: Db) {
     } catch (e) {
       // um lote ruim não derruba os outros; o que faltar entra na próxima coleta
       errs.push((e as Error).message);
-      if (errs.length >= 2 && done === 0) break;
+      if (done === 0) break; // o primeiro lote já falhou em todos os modelos: não insiste
     }
     if (i + size < todo.length) await new Promise((res) => setTimeout(res, 7000)); // respeita o limite por minuto
   }

@@ -122,15 +122,26 @@ export async function classifyBatch(
   apiKey: string,
   models: string[],
   doFetch: Fetch = fetch,
-  timeoutMs = 120_000,
+  timeoutMs = 75_000,
 ): Promise<{ insights: Insight[]; model: string }> {
-  const body = JSON.stringify({
-    contents: [{ role: "user", parts: [{ text: buildPrompt(batch) }] }],
-    generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: SCHEMA },
-  });
+  const prompt = buildPrompt(batch);
+  // sem "pensar": a tarefa é simples e o modo de raciocínio deixa a resposta lenta demais
+  const makeBody = (noThinking: boolean) =>
+    JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        responseSchema: SCHEMA,
+        ...(noThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+      },
+    });
+  const errs: string[] = [];
   let lastErr = "";
   for (const model of models) {
+    let noThinking = true;
     for (let attempt = 0; attempt < 3; attempt++) {
+      const body = makeBody(noThinking);
       let res: Response;
       try {
         res = await doFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -154,16 +165,31 @@ export async function classifyBatch(
         lastErr = `${model}: modelo não encontrado`;
         break; // tenta o próximo modelo
       }
-      if (!res.ok) throw new Error(`Gemini ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+      if (res.status === 400 && noThinking) {
+        const t = await res.text();
+        if (/thinking/i.test(t)) {
+          noThinking = false; // modelo não aceita desligar o raciocínio: tenta sem essa opção
+          attempt--;
+          continue;
+        }
+        lastErr = `${model}: HTTP 400 ${t.slice(0, 160)}`;
+        break;
+      }
+      if (!res.ok) {
+        lastErr = `${model}: HTTP ${res.status} ${(await res.text()).slice(0, 160)}`;
+        break;
+      }
       const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
       const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
       return { insights: parseInsights(text, batch.map((b) => b.key)), model };
     }
+    if (lastErr) errs.push(lastErr);
+    lastErr = "";
   }
-  throw new Error(`Gemini indisponível (${lastErr})`);
+  throw new Error(`Gemini indisponível (${[...errs, lastErr].filter(Boolean).join("; ")})`);
 }
 
 export function geminiModels(): string[] {
   const env = (process.env.GEMINI_MODEL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return [...new Set([...env, "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"])];
+  return [...new Set([...env, "gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"])];
 }
