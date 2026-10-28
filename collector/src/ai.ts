@@ -122,6 +122,7 @@ export async function classifyBatch(
   apiKey: string,
   models: string[],
   doFetch: Fetch = fetch,
+  timeoutMs = 120_000,
 ): Promise<{ insights: Insight[]; model: string }> {
   const body = JSON.stringify({
     contents: [{ role: "user", parts: [{ text: buildPrompt(batch) }] }],
@@ -130,12 +131,20 @@ export async function classifyBatch(
   let lastErr = "";
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const res = await doFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body,
-        signal: AbortSignal.timeout(90_000),
-      });
+      let res: Response;
+      try {
+        res = await doFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (e) {
+        // demorou demais ou caiu a conexão: tenta de novo e, na segunda vez, passa para o próximo modelo
+        lastErr = `${model}: ${(e as Error).name === "TimeoutError" ? "demorou demais" : (e as Error).message}`;
+        if (attempt >= 1) break;
+        continue;
+      }
       if (res.status === 429 || res.status === 503) {
         lastErr = `${model}: ${res.status}`;
         await sleep(20_000 * (attempt + 1));

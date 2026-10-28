@@ -155,21 +155,30 @@ async function runAi(client: Db) {
     notes.push("IA: pulada (GEMINI_API_KEY não configurada)");
     return;
   }
-  const size = num("AI_BATCH", 8);
-  const todo = await db.offersForAi(client, size * num("AI_BATCHES", 6), inputHash);
+  const size = num("AI_BATCH", 6);
+  const todo = await db.offersForAi(client, size * num("AI_BATCHES", 8), inputHash);
   let done = 0;
   let model = "";
+  const errs: string[] = [];
   for (let i = 0; i < todo.length; i += size) {
     const batch = todo.slice(i, i + size);
-    const r = await classifyBatch(batch, key, geminiModels());
-    model = r.model;
-    const byKey = new Map(batch.map((b) => [b.key, b.hash]));
-    await db.saveInsights(client, r.insights.map((x) => ({ ...x, hash: byKey.get(x.key)!, model: r.model })));
-    done += r.insights.length;
+    try {
+      const r = await classifyBatch(batch, key, geminiModels());
+      model = r.model;
+      const byKey = new Map(batch.map((b) => [b.key, b.hash]));
+      await db.saveInsights(client, r.insights.map((x) => ({ ...x, hash: byKey.get(x.key)!, model: r.model })));
+      done += r.insights.length;
+    } catch (e) {
+      // um lote ruim não derruba os outros; o que faltar entra na próxima coleta
+      errs.push((e as Error).message);
+      if (errs.length >= 2 && done === 0) break;
+    }
     if (i + size < todo.length) await new Promise((res) => setTimeout(res, 7000)); // respeita o limite por minuto
   }
-  await db.logRun(client, "ia", true, done, model);
-  notes.push(`IA: ${done}/${todo.length} ofertas classificadas${model ? ` (${model})` : ""}`);
+  const ok = done > 0 || todo.length === 0;
+  await db.logRun(client, "ia", ok, done, [model, ...errs].filter(Boolean).join("\n"));
+  notes.push(`IA: ${done}/${todo.length} ofertas classificadas${model ? ` (${model})` : ""}${errs.length ? `. Lotes com falha: ${errs.length} (${errs[0]})` : ""}`);
+  if (!ok) throw new Error(`IA: nenhum lote classificado (${errs[0]})`);
 }
 
 /** Guarda as imagens dos criativos antes que o link do Facebook expire. */

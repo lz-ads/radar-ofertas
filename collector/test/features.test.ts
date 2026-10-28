@@ -172,3 +172,19 @@ test("wellFormed troca metade solta de emoji (Postgres recusa)", async () => {
   assert.equal(out.b[0], "ok 🔥");
   assert.equal(out.n, 3);
 });
+
+test("classifyBatch: tempo esgotado passa para o próximo modelo", async () => {
+  const calls: string[] = [];
+  const fake = (async (url: string) => {
+    calls.push(String(url));
+    if (String(url).includes("lento")) {
+      const e = new Error("timeout");
+      e.name = "TimeoutError";
+      throw e;
+    }
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ ofertas: [] }) }] } }] }), { status: 200 });
+  }) as typeof fetch;
+  const r = await classifyBatch([], "k", ["lento", "rapido"], fake, 10);
+  assert.equal(r.model, "rapido");
+  assert.equal(calls.filter((c) => c.includes("lento")).length, 2);
+});
