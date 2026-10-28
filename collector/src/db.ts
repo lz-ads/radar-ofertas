@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { OfferInput } from "./ai.js";
 import type { AdWithMeta, OfferAlias } from "./aggregate.js";
@@ -64,9 +65,23 @@ async function inChunks<T>(rows: T[], size: number, fn: (chunk: T[]) => Promise<
   for (let i = 0; i < rows.length; i += size) await fn(rows.slice(i, i + size));
 }
 
-export async function loadKeywords(db: SupabaseClient): Promise<string[]> {
-  const data = check(await db.from("keywords").select("term").eq("active", true).order("id"), "keywords");
-  return (data ?? []).map((r: { term: string }) => r.term);
+export interface SearchTerm {
+  term: string;
+  country: string;
+}
+
+export async function loadKeywords(db: SupabaseClient): Promise<SearchTerm[]> {
+  const data = check(await db.from("keywords").select("term, country").eq("active", true).order("id"), "keywords");
+  return (data ?? []).map((r: { term: string; country: string | null }) => ({ term: r.term, country: (r.country || "BR").toUpperCase() }));
+}
+
+/** Lista de espionagem: termos buscados a cada coleta, além das palavras-chave. */
+export async function loadWatch(db: SupabaseClient): Promise<(SearchTerm & { offerKey: string | null; label: string })[]> {
+  const res = await db.from("watchlist").select("term, country, offer_key, label").order("id");
+  if (res.error) return []; // tabela ainda não criada: segue sem espionagem
+  return (res.data ?? []).map((r: { term: string; country: string | null; offer_key: string | null; label: string }) => ({
+    term: r.term, country: (r.country || "BR").toUpperCase(), offerKey: r.offer_key, label: r.label,
+  }));
 }
 
 export async function loadIgnored(db: SupabaseClient): Promise<Set<string>> {
@@ -74,7 +89,7 @@ export async function loadIgnored(db: SupabaseClient): Promise<Set<string>> {
   return new Set((data ?? []).map((r: { name: string }) => r.name.toLowerCase()));
 }
 
-export async function saveAds(db: SupabaseClient, ads: AdWithMeta[]) {
+export async function saveAds(db: SupabaseClient, ads: (AdWithMeta & { country?: string })[]) {
   const now = new Date().toISOString();
   await inChunks(ads, 500, async (chunk) => {
     check(
@@ -94,6 +109,8 @@ export async function saveAds(db: SupabaseClient, ads: AdWithMeta[]) {
           media_type: a.mediaType ?? null,
           cta: a.cta ?? null,
           dest_type: a.destType ?? null,
+          video_url: a.videoUrl ?? null,
+          country: a.country ?? "BR",
           last_seen: now,
         })),
         { onConflict: "library_id" },
@@ -103,7 +120,7 @@ export async function saveAds(db: SupabaseClient, ads: AdWithMeta[]) {
   });
 }
 
-export async function saveSnapshots(db: SupabaseClient, day: string, snaps: OfferSnapshot[]) {
+export async function saveSnapshots(db: SupabaseClient, day: string, snaps: (OfferSnapshot & { country?: string })[]) {
   await inChunks(snaps, 500, async (chunk) => {
     check(
       await db.from("offer_snapshots").upsert(
@@ -123,6 +140,7 @@ export async function saveSnapshots(db: SupabaseClient, day: string, snaps: Offe
           page_url: s.pageUrl,
           thumb_url: s.thumbUrl,
           dest_type: s.destType,
+          country: s.country ?? "BR",
         })),
         { onConflict: "day,offer_key" },
       ),
@@ -172,12 +190,15 @@ export async function logRun(db: SupabaseClient | null, source: string, ok: bool
 }
 
 /** Anunciante -> oferta com site, de coletas dos últimos 30 dias (para juntar duplicadas). */
-export async function loadAliasHints(db: SupabaseClient): Promise<Map<string, string>> {
+export async function loadAliasHints(db: SupabaseClient, country = "BR"): Promise<Map<string, string>> {
   const since = new Date(Date.now() - 30 * 864e5).toISOString();
-  const rows = check(
-    await db.from("ads").select("advertiser, offer_key, copies").like("offer_key", "d:%").gte("last_seen", since).limit(10000),
+  const prefix = country === "BR" ? "d:%" : `${country.toLowerCase()}:d:%`;
+  const raw = check(
+    await db.from("ads").select("advertiser, offer_key, copies").like("offer_key", prefix).gte("last_seen", since).limit(10000),
     "ads (apelidos)",
   ) as { advertiser: string; offer_key: string; copies: number }[];
+  // as dicas usam a chave sem o país (o país é aplicado depois de agrupar)
+  const rows = raw.map((r) => ({ ...r, offer_key: r.offer_key.replace(/^[a-z]{2}:(?=d:)/, "") }));
   const byName = new Map<string, Map<string, number>>();
   for (const r of rows) {
     const n = normalizeName(r.advertiser);
@@ -211,9 +232,37 @@ export async function landingsToCheck(db: SupabaseClient, limit: number): Promis
   return [...new Set(offers.map((o) => o.landing_url))].filter((u) => isVisitable(u) && !seen.has(u)).slice(0, limit);
 }
 
+/** Páginas das ofertas prioritárias que ainda não têm print ou texto completo (kit de modelagem). */
+export async function landingsNeedingShot(db: SupabaseClient, keys: string[], limit: number): Promise<string[]> {
+  if (!keys.length) return [];
+  const offers = check(
+    await db.from("offer_ranking").select("offer_key, landing_url").in("offer_key", keys.slice(0, 300)).not("landing_url", "is", null),
+    "offer_ranking (prints)",
+  ) as { offer_key: string; landing_url: string }[];
+  const order = new Map(keys.map((k, i) => [k, i]));
+  const urls = [...new Set(offers.sort((a, b) => (order.get(a.offer_key) ?? 0) - (order.get(b.offer_key) ?? 0)).map((o) => o.landing_url))].filter(isVisitable);
+  if (!urls.length) return [];
+  const done = check(
+    await db.from("landing_pages").select("url, shot_path, full_text").in("url", urls).not("shot_path", "is", null).not("full_text", "is", null),
+    "landing_pages (prints)",
+  ) as { url: string }[];
+  const have = new Set(done.map((d) => d.url));
+  return urls.filter((u) => !have.has(u)).slice(0, limit);
+}
+
+export const SHOTS_BUCKET = "paginas";
+
 export async function saveLandings(db: SupabaseClient, rows: LandingInfo[]) {
   if (!rows.length) return;
   const now = new Date().toISOString();
+  const shotPath = new Map<string, string>();
+  for (const r of rows) {
+    if (!r.shot) continue;
+    const path = `p/${createHash("sha1").update(r.url).digest("hex").slice(0, 24)}.webp`;
+    const up = await db.storage.from(SHOTS_BUCKET).upload(path, r.shot, { contentType: "image/webp", upsert: true, cacheControl: "86400" });
+    if (up.error) console.warn(`[paginas] print não salvo ${r.url}:`, up.error.message);
+    else shotPath.set(r.url, path);
+  }
   check(
     await db.from("landing_pages").upsert(
       rows.map((r) => ({
@@ -221,6 +270,10 @@ export async function saveLandings(db: SupabaseClient, rows: LandingInfo[]) {
         platform: r.platform, checkout: r.checkout, prices: r.prices, price_min: r.priceMin, price_max: r.priceMax,
         installments: r.installments, cod: r.cod, has_vsl: r.hasVsl, has_countdown: r.hasCountdown,
         has_whatsapp: r.hasWhatsapp, pixels: r.pixels, excerpt: r.excerpt, error: r.error, checked_at: now,
+        currency: r.currency ?? null,
+        // print e texto completo só quando foram feitos agora (não apaga os anteriores)
+        ...(r.fullText ? { full_text: r.fullText } : {}),
+        ...(shotPath.has(r.url) ? { shot_path: shotPath.get(r.url) } : {}),
       })),
       { onConflict: "url" },
     ),
@@ -327,4 +380,186 @@ export async function ranToday(db: SupabaseClient, source: string, day: string):
   const since = new Date(`${day}T00:00:00-03:00`).toISOString();
   const res = await db.from("runs").select("id", { count: "exact", head: true }).eq("source", source).eq("ok", true).gte("finished_at", since);
   return (res.count ?? 0) > 0;
+}
+
+/**
+ * Ofertas que merecem guardar mídia, print e kit: as do seu funil e da espionagem primeiro,
+ * depois as de maior score com sinal de escala.
+ */
+export async function priorityKeys(db: SupabaseClient, topN: number): Promise<string[]> {
+  const [funnel, watch, top] = await Promise.all([
+    db.from("offer_notes").select("offer_key, status").not("status", "is", null).neq("status", "descartada").limit(500),
+    db.from("watchlist").select("offer_key").not("offer_key", "is", null).limit(500),
+    db.from("offer_ranking").select("offer_key").eq("discarded", false).or(SIGNAL).order("score", { ascending: false }).limit(topN),
+  ]);
+  const keys = [
+    ...((funnel.data ?? []) as { offer_key: string }[]).map((r) => r.offer_key),
+    ...((watch.data ?? []) as { offer_key: string }[]).map((r) => r.offer_key),
+    ...(check(top, "offer_ranking (prioridade)") ?? []).map((r: { offer_key: string }) => r.offer_key),
+  ];
+  return [...new Set(keys)];
+}
+
+/** Vídeos/imagens originais ainda não guardados: os N anúncios com mais cópias de cada oferta prioritária. */
+export async function mediaToStore(db: SupabaseClient, keys: string[], perOffer: number, limit: number) {
+  if (!keys.length) return [];
+  const since = new Date(Date.now() - 3 * 864e5).toISOString(); // link do Facebook ainda válido
+  const rows: { library_id: string; offer_key: string; media_type: string | null; video_url: string | null; thumb_url: string | null; media_path: string | null }[] = [];
+  for (let i = 0; i < keys.length; i += 150) {
+    const res = await db.from("ads").select("library_id, offer_key, media_type, video_url, thumb_url, media_path")
+      .in("offer_key", keys.slice(i, i + 150)).gte("last_seen", since).order("copies", { ascending: false }).limit(3000);
+    rows.push(...(check(res, "ads (mídia)") ?? []));
+  }
+  const rank = new Map(keys.map((k, i) => [k, i]));
+  const byOffer = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const list = byOffer.get(r.offer_key) ?? [];
+    list.push(r);
+    byOffer.set(r.offer_key, list);
+  }
+  const out: import("./media.js").MediaItem[] = [];
+  for (const [key, list] of [...byOffer].sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0))) {
+    void key;
+    for (const r of list.slice(0, perOffer)) {
+      if (r.media_path) continue;
+      if (r.video_url) out.push({ libraryId: r.library_id, url: r.video_url, kind: "video" });
+      else if (r.thumb_url && r.media_type !== "video") out.push({ libraryId: r.library_id, url: r.thumb_url, kind: "image" });
+    }
+    if (out.length >= limit) break;
+  }
+  return out.slice(0, limit);
+}
+
+/** Vídeos já guardados (até 18 MB, limite do envio direto ao Gemini) que ainda não foram transcritos. */
+export async function videosToTranscribe(db: SupabaseClient, keys: string[], limit: number) {
+  if (!keys.length) return [];
+  const rows: { library_id: string; offer_key: string; media_path: string; media_bytes: number | null; copies: number }[] = [];
+  for (let i = 0; i < keys.length; i += 150) {
+    const res = await db.from("ads").select("library_id, offer_key, media_path, media_bytes, copies")
+      .in("offer_key", keys.slice(i, i + 150)).like("media_path", "%.mp4").lte("media_bytes", 18 * 1024 * 1024)
+      .order("copies", { ascending: false }).limit(1000);
+    rows.push(...(check(res, "ads (vídeos)") ?? []));
+  }
+  if (!rows.length) return [];
+  const done = new Set(
+    ((check(await db.from("ad_transcripts").select("library_id").in("library_id", rows.map((r) => r.library_id)), "ad_transcripts") ?? []) as { library_id: string }[])
+      .map((r) => r.library_id),
+  );
+  const order = new Map(keys.map((k, i) => [k, i]));
+  return rows
+    .filter((r) => !done.has(r.library_id))
+    .sort((a, b) => (order.get(a.offer_key) ?? 0) - (order.get(b.offer_key) ?? 0) || b.copies - a.copies)
+    .slice(0, limit);
+}
+
+export async function saveTranscript(
+  db: SupabaseClient,
+  libraryId: string,
+  t: { transcricao: string; gancho: string; estrutura: string; cta: string },
+  model: string,
+) {
+  check(
+    await db.from("ad_transcripts").upsert(
+      { library_id: libraryId, transcript: t.transcricao, hook: t.gancho, structure: t.estrutura, cta: t.cta, model, created_at: new Date().toISOString() },
+      { onConflict: "library_id" },
+    ),
+    "ad_transcripts",
+  );
+}
+
+/** Dados para o mapa da página (kit) das ofertas prioritárias com texto completo da página. */
+export async function kitsToBuild(db: SupabaseClient, keys: string[], limit: number, hash: (k: import("./ai.js").KitInput) => string) {
+  if (!keys.length) return [];
+  const offers = (check(
+    await db.from("offer_ranking").select("offer_key, advertiser, domain, landing_url, platform, checkout").in("offer_key", keys.slice(0, 300)).not("landing_url", "is", null),
+    "offer_ranking (kits)",
+  ) ?? []) as { offer_key: string; advertiser: string; domain: string | null; landing_url: string; platform: string | null; checkout: string | null }[];
+  if (!offers.length) return [];
+  const [pages, kits, ads] = await Promise.all([
+    db.from("landing_pages").select("url, full_text, prices, currency").in("url", [...new Set(offers.map((o) => o.landing_url))]).not("full_text", "is", null),
+    db.from("offer_kits").select("offer_key, source_hash").in("offer_key", offers.map((o) => o.offer_key)),
+    db.from("ads").select("offer_key, body, copies").in("offer_key", offers.map((o) => o.offer_key)).order("copies", { ascending: false }).limit(2000),
+  ]);
+  const page = new Map(((pages.data ?? []) as { url: string; full_text: string; prices: number[] | null; currency: string | null }[]).map((p) => [p.url, p]));
+  const stored = new Map(((kits.data ?? []) as { offer_key: string; source_hash: string | null }[]).map((k) => [k.offer_key, k.source_hash]));
+  const texts = new Map<string, string[]>();
+  for (const a of (ads.data ?? []) as { offer_key: string; body: string | null }[]) {
+    if (!a.body) continue;
+    const l = texts.get(a.offer_key) ?? [];
+    if (l.length < 3 && !l.includes(a.body)) l.push(a.body);
+    texts.set(a.offer_key, l);
+  }
+  const order = new Map(keys.map((k, i) => [k, i]));
+  const out: (import("./ai.js").KitInput & { hash: string })[] = [];
+  for (const o of offers.sort((a, b) => (order.get(a.offer_key) ?? 0) - (order.get(b.offer_key) ?? 0))) {
+    const p = page.get(o.landing_url);
+    if (!p?.full_text || p.full_text.length < 200) continue;
+    const input = {
+      key: o.offer_key, advertiser: o.advertiser, domain: o.domain, url: o.landing_url, pageText: p.full_text,
+      prices: (p.prices ?? []).map(Number), currency: p.currency, checkout: o.checkout, platform: o.platform, adTexts: texts.get(o.offer_key) ?? [],
+    };
+    const h = hash(input);
+    if (stored.get(o.offer_key) === h) continue;
+    out.push({ ...input, hash: h });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export async function saveKit(db: SupabaseClient, key: string, structure: unknown, model: string, hash: string) {
+  check(
+    await db.from("offer_kits").upsert(
+      { offer_key: key, structure, model, source_hash: hash, updated_at: new Date().toISOString() },
+      { onConflict: "offer_key" },
+    ),
+    "offer_kits",
+  );
+}
+
+/** Itens da espionagem adicionados à mão (só o termo): liga à oferta quando ela aparecer no ranking. */
+export async function resolveWatch(db: SupabaseClient) {
+  const res = await db.from("watchlist").select("id, term, country").is("offer_key", null);
+  if (res.error || !res.data?.length) return 0;
+  let n = 0;
+  for (const w of res.data as { id: number; term: string; country: string }[]) {
+    const t = w.term.trim().toLowerCase();
+    const q = db.from("offer_ranking").select("offer_key, score").eq("country", w.country).order("score", { ascending: false }).limit(1);
+    const found = t.includes(".") && !t.includes(" ")
+      ? await q.or(`domain.eq.${t},domain.like.%.${t}`)
+      : await q.ilike("advertiser", t.replace(/[%_,()]/g, " "));
+    const key = (found.data?.[0] as { offer_key?: string } | undefined)?.offer_key;
+    if (key) {
+      await db.from("watchlist").update({ offer_key: key }).eq("id", w.id);
+      n++;
+    }
+  }
+  return n;
+}
+
+/** Quantos anúncios novos cada oferta espionada ganhou desde o último aviso. */
+export async function watchNews(db: SupabaseClient, sent: Map<string, number>) {
+  const res = await db.from("watchlist").select("offer_key, label").not("offer_key", "is", null);
+  if (res.error) return { news: [], toMark: [] as string[] };
+  const news: import("./alerts.js").WatchNews[] = [];
+  const toMark: string[] = [];
+  for (const w of (res.data ?? []) as { offer_key: string; label: string }[]) {
+    const since = sent.get(`${w.offer_key}|watch`);
+    if (since === undefined) {
+      toMark.push(w.offer_key); // primeira vez: só marca o ponto de partida
+      continue;
+    }
+    const c = await db.from("ads").select("library_id", { count: "exact", head: true }).eq("offer_key", w.offer_key).gt("first_seen", new Date(since).toISOString());
+    if ((c.count ?? 0) > 0) {
+      news.push({ key: w.offer_key, label: w.label, newAds: c.count ?? 0 });
+      toMark.push(w.offer_key);
+    }
+  }
+  return { news, toMark };
+}
+
+/** Ofertas do seu funil que estão esfriando. */
+export async function coolingInFunnel(db: SupabaseClient) {
+  const res = await db.from("offer_ranking").select("offer_key, advertiser, copies, copies_7d, status")
+    .eq("cooling", true).not("status", "is", null).eq("discarded", false).limit(50);
+  return res.error ? [] : ((res.data ?? []) as import("./alerts.js").CoolingRow[]);
 }

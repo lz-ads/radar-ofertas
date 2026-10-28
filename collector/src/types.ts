@@ -14,6 +14,7 @@ export interface MetaAd {
   landingUrl?: string | null; // página de destino (vendas), sem parâmetros de rastreio
   thumbUrl?: string | null;   // imagem do criativo (ou capa do vídeo)
   mediaType?: "image" | "video" | null;
+  videoUrl?: string | null;   // arquivo do vídeo (link do Facebook, expira em poucos dias)
 }
 
 /** Links e mídia lidos do HTML de cada card, por ID da biblioteca. */

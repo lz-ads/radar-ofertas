@@ -113,28 +113,33 @@ export function parseInsights(raw: string, keys: string[]): Insight[] {
 type Fetch = typeof fetch;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
+
 /**
- * Chama o Gemini (cota gratuita do Google AI Studio). Tenta os modelos em ordem até um responder.
- * Em limite de uso (429) espera e tenta de novo.
+ * Chama o Gemini (cota gratuita do Google AI Studio) pedindo JSON no formato `schema`.
+ * Tenta os modelos em ordem até um responder. Em limite de uso (429/503) espera e tenta de novo;
+ * se demorar demais, tenta mais uma vez e passa para o próximo modelo.
  */
-export async function classifyBatch(
-  batch: OfferInput[],
-  apiKey: string,
-  models: string[],
-  doFetch: Fetch = fetch,
-  timeoutMs = 90_000,
-): Promise<{ insights: Insight[]; model: string }> {
-  const prompt = buildPrompt(batch);
-  // pouco "raciocínio": a tarefa é simples e o modo de pensar deixa a resposta lenta demais.
+export async function geminiJson(opts: {
+  apiKey: string;
+  models: string[];
+  parts: GeminiPart[];
+  schema: object;
+  doFetch?: Fetch;
+  timeoutMs?: number;
+  temperature?: number;
+}): Promise<{ text: string; model: string }> {
+  const { apiKey, models, parts, schema, doFetch = fetch, timeoutMs = 90_000, temperature = 0.2 } = opts;
+  // pouco "raciocínio": as tarefas são simples e o modo de pensar deixa a resposta lenta demais.
   // Cada geração de modelo aceita uma opção diferente; se uma der erro 400, tenta a próxima.
   const THINKING: (object | null)[] = [{ thinkingLevel: "low" }, { thinkingBudget: 0 }, null];
   const makeBody = (variant: number) =>
     JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: [{ role: "user", parts }],
       generationConfig: {
-        temperature: 0.2,
+        temperature,
         responseMimeType: "application/json",
-        responseSchema: SCHEMA,
+        responseSchema: schema,
         ...(THINKING[variant] ? { thinkingConfig: THINKING[variant] } : {}),
       },
     });
@@ -153,7 +158,6 @@ export async function classifyBatch(
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (e) {
-        // demorou demais ou caiu a conexão: tenta de novo e, na segunda vez, passa para o próximo modelo
         lastErr = `${model}: ${(e as Error).name === "TimeoutError" ? "demorou demais" : (e as Error).message}`;
         if (attempt >= 1) break;
         continue;
@@ -179,12 +183,165 @@ export async function classifyBatch(
       }
       const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
       const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-      return { insights: parseInsights(text, batch.map((b) => b.key)), model };
+      return { text, model };
     }
     if (lastErr) errs.push(lastErr);
     lastErr = "";
   }
   throw new Error(`Gemini indisponível (${[...errs, lastErr].filter(Boolean).join("; ")})`);
+}
+
+/** Classifica um lote de ofertas (nicho, tipo, promessa, risco...). */
+export async function classifyBatch(
+  batch: OfferInput[],
+  apiKey: string,
+  models: string[],
+  doFetch: Fetch = fetch,
+  timeoutMs = 90_000,
+): Promise<{ insights: Insight[]; model: string }> {
+  const r = await geminiJson({ apiKey, models, parts: [{ text: buildPrompt(batch) }], schema: SCHEMA, doFetch, timeoutMs });
+  return { insights: parseInsights(r.text, batch.map((b) => b.key)), model: r.model };
+}
+
+/** Lê JSON vindo da IA (às vezes com cerca de código em volta). */
+export function parseJson<T>(raw: string): T | null {
+  try {
+    return JSON.parse(raw.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, "")) as T;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------------- Transcrição dos vídeos ---------------- */
+
+export interface Transcript {
+  transcricao: string;
+  gancho: string;
+  estrutura: string;
+  cta: string;
+}
+
+const TRANSCRIPT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    transcricao: { type: "STRING" },
+    gancho: { type: "STRING" },
+    estrutura: { type: "STRING" },
+    cta: { type: "STRING" },
+  },
+  required: ["transcricao", "gancho", "estrutura", "cta"],
+};
+
+export const TRANSCRIBE_PROMPT = [
+  "Este é um vídeo de anúncio. Responda em português do Brasil (a transcrição fica no idioma original do vídeo).",
+  "- transcricao: tudo o que é falado, palavra por palavra; inclua entre colchetes textos importantes que aparecem na tela.",
+  "- gancho: o que acontece e o que é dito nos primeiros 3 segundos (até 25 palavras).",
+  "- estrutura: as etapas do vídeo em ordem, separadas por ' → ' (ex.: gancho → problema → demonstração → prova → oferta → chamada).",
+  "- cta: a chamada para ação do final (até 15 palavras).",
+  "Se não houver fala, descreva as cenas em 'transcricao'.",
+].join("\n");
+
+/** Transcreve um vídeo (até ~18 MB, enviado junto no pedido) e separa gancho, estrutura e chamada. */
+export async function transcribeVideo(video: Buffer, apiKey: string, models: string[], doFetch: Fetch = fetch) {
+  const r = await geminiJson({
+    apiKey, models, doFetch, timeoutMs: 150_000, schema: TRANSCRIPT_SCHEMA,
+    parts: [{ inlineData: { mimeType: "video/mp4", data: video.toString("base64") } }, { text: TRANSCRIBE_PROMPT }],
+  });
+  const t = parseJson<Transcript>(r.text);
+  if (!t || typeof t.transcricao !== "string") throw new Error("resposta da IA fora do formato");
+  const clip = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+  return {
+    transcript: { transcricao: clip(t.transcricao, 8000), gancho: clip(t.gancho, 400), estrutura: clip(t.estrutura, 600), cta: clip(t.cta, 300) },
+    model: r.model,
+  };
+}
+
+/* ---------------- Kit de modelagem: mapa da página e do funil ---------------- */
+
+export interface KitInput {
+  key: string;
+  advertiser: string;
+  domain: string | null;
+  url: string;
+  pageText: string;
+  prices: number[];
+  currency: string | null;
+  checkout: string | null;
+  platform: string | null;
+  adTexts: string[];
+}
+
+export interface KitStructure {
+  resumo: string;
+  publico: string;
+  promessa: string;
+  mecanismo: string;
+  angulo: string;
+  secoes: { tipo: string; titulo: string; resumo: string }[];
+  oferta: { kits: { nome: string; preco: string }[]; bonus: string[]; garantia: string; frete: string; pagamento: string; escassez: string };
+  provas: string[];
+  objecoes: string[];
+  ctas: string[];
+  funil: string;
+  ideias_de_teste: string[];
+}
+
+const S = { type: "STRING" };
+const SA = { type: "ARRAY", items: S };
+const KIT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    resumo: S, publico: S, promessa: S, mecanismo: S, angulo: S,
+    secoes: { type: "ARRAY", items: { type: "OBJECT", properties: { tipo: S, titulo: S, resumo: S }, required: ["tipo", "titulo", "resumo"] } },
+    oferta: {
+      type: "OBJECT",
+      properties: {
+        kits: { type: "ARRAY", items: { type: "OBJECT", properties: { nome: S, preco: S }, required: ["nome", "preco"] } },
+        bonus: SA, garantia: S, frete: S, pagamento: S, escassez: S,
+      },
+      required: ["kits", "bonus", "garantia", "frete", "pagamento", "escassez"],
+    },
+    provas: SA, objecoes: SA, ctas: SA, funil: S, ideias_de_teste: SA,
+  },
+  required: ["resumo", "publico", "promessa", "mecanismo", "angulo", "secoes", "oferta", "provas", "objecoes", "ctas", "funil", "ideias_de_teste"],
+};
+
+export function kitHash(k: KitInput): string {
+  return createHash("sha1").update(JSON.stringify([k.url, k.pageText.slice(0, 20000), k.prices, k.adTexts.slice(0, 3)])).digest("hex").slice(0, 16);
+}
+
+export function buildKitPrompt(k: KitInput): string {
+  return [
+    "Você é um estrategista de resposta direta. Analise a página de vendas abaixo (texto extraído, em ordem) e os anúncios que levam a ela.",
+    "Monte o MAPA DA ESTRUTURA para um gestor de tráfego entender e testar uma oferta parecida com o PRÓPRIO produto dele.",
+    "Regras: responda em português do Brasil; resuma com as suas palavras, NÃO copie parágrafos da página; seja concreto (números, prazos, preços).",
+    "- resumo: o que é vendido e como, em 2 frases",
+    "- publico, promessa, mecanismo (por que funciona, segundo a página), angulo (a abordagem principal: medo, desejo, novidade, autoridade...)",
+    "- secoes: cada bloco da página em ordem (tipo: headline | subheadline | vsl | beneficios | prova social | autoridade | como funciona | oferta | bonus | garantia | faq | escassez | cta | outro), com um título curto e um resumo de até 20 palavras",
+    "- oferta: kits/planos com preço como aparece, bônus, garantia, frete, formas de pagamento, escassez/urgência (vazio se não houver)",
+    "- provas: tipos de prova usados (depoimentos, antes/depois, números, mídia...)",
+    "- objecoes: objeções que a página quebra",
+    "- ctas: textos dos botões",
+    "- funil: o caminho do clique até a compra (página → checkout X → upsell/order bump, se der para perceber)",
+    "- ideias_de_teste: 5 ideias práticas para testar uma versão própria (ângulo, criativo, oferta)",
+    "",
+    `Anunciante: ${k.advertiser}${k.domain ? ` (${k.domain})` : ""}`,
+    `Página: ${k.url}`,
+    `Feita em: ${k.platform ?? "?"} · checkout: ${k.checkout ?? "?"} · preços encontrados: ${k.prices.length ? k.prices.join(", ") + (k.currency ? ` ${k.currency}` : "") : "nenhum"}`,
+    "",
+    "ANÚNCIOS:",
+    ...k.adTexts.slice(0, 3).map((t, i) => `${i + 1}. ${t.slice(0, 600)}`),
+    "",
+    "TEXTO DA PÁGINA:",
+    k.pageText.slice(0, 20000),
+  ].join("\n");
+}
+
+export async function buildKit(k: KitInput, apiKey: string, models: string[], doFetch: Fetch = fetch) {
+  const r = await geminiJson({ apiKey, models, doFetch, timeoutMs: 120_000, schema: KIT_SCHEMA, parts: [{ text: buildKitPrompt(k) }] });
+  const kit = parseJson<KitStructure>(r.text);
+  if (!kit || !Array.isArray(kit.secoes)) throw new Error("resposta da IA fora do formato");
+  return { kit, model: r.model };
 }
 
 const FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"];

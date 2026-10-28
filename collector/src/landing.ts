@@ -18,6 +18,9 @@ export interface LandingInfo {
   pixels: string[];
   excerpt: string | null;    // começo do texto da página (vai para a IA)
   error: string | null;
+  currency?: string | null;  // BRL, USD, GBP, EUR, JPY
+  fullText?: string | null;  // texto completo (kit de modelagem)
+  shot?: Buffer | null;      // print da página inteira (só das ofertas prioritárias)
 }
 
 const PLATFORMS: [string, RegExp][] = [
@@ -97,6 +100,34 @@ export function extractPrices(text: string): { prices: number[]; installments: s
   return { prices: [...new Set(prices)].sort((a, b) => a - b).slice(0, 12), installments };
 }
 
+/** "1,299.90" -> 1299.9 (formato inglês/japonês) */
+const enNum = (s: string) => Number(s.replace(/,/g, ""));
+
+/**
+ * Preços de páginas de outros países: dólar, libra, euro e iene.
+ * Devolve a moeda mais frequente e os valores nela.
+ */
+export function extractForeignPrices(text: string): { currency: string | null; prices: number[] } {
+  const found: Record<string, number[]> = { USD: [], GBP: [], EUR: [], JPY: [] };
+  const push = (cur: string, v: number) => {
+    if (Number.isFinite(v) && v >= 1 && v <= (cur === "JPY" ? 5_000_000 : 50_000)) found[cur].push(v);
+  };
+  let m: RegExpExecArray | null;
+  const usd = /(?:US\$|\$)\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)(?!\d)/g;
+  while ((m = usd.exec(text))) push("USD", enNum(m[1]));
+  const gbp = /£\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/g;
+  while ((m = gbp.exec(text))) push("GBP", enNum(m[1]));
+  const eurBefore = /€\s?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)/g;
+  while ((m = eurBefore.exec(text))) push("EUR", Number(m[1].replace(/[.,](?=\d{3}\b)/g, "").replace(",", ".")));
+  const eurAfter = /(\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?)\s?€/g;
+  while ((m = eurAfter.exec(text))) push("EUR", brl(m[1].replace(/\s/g, ".")));
+  const jpy = /(?:[¥￥]\s?(\d{1,3}(?:,\d{3})+|\d+))|(?:(\d{1,3}(?:,\d{3})+|\d+)\s?円)/g;
+  while ((m = jpy.exec(text))) push("JPY", enNum(m[1] ?? m[2]));
+  const [currency, list] = Object.entries(found).sort((a, b) => b[1].length - a[1].length)[0];
+  if (!list.length) return { currency: null, prices: [] };
+  return { currency, prices: [...new Set(list)].sort((a, b) => a - b).slice(0, 12) };
+}
+
 /** Analisa o HTML e o texto visível de uma página (função pura, testável). */
 export function analyzeLanding(url: string, html: string, text: string, finalUrl: string | null = null, status: number | null = null): LandingInfo {
   const h = html.toLowerCase();
@@ -105,7 +136,11 @@ export function analyzeLanding(url: string, html: string, text: string, finalUrl
     html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']{1,300})`, "i"))?.[1] ??
     html.match(new RegExp(`<meta[^>]+content=["']([^"']{1,300})["'][^>]+(?:name|property)=["']${name}["']`, "i"))?.[1] ?? null;
   const title = (html.match(/<title[^>]*>([^<]{1,200})<\/title>/i)?.[1] ?? meta("og:title"))?.trim() ?? null;
-  const { prices, installments } = extractPrices(text);
+  const br = extractPrices(text);
+  const foreign = br.prices.length ? null : extractForeignPrices(text);
+  const prices = foreign?.prices.length ? foreign.prices : br.prices;
+  const installments = br.installments;
+  const currency = foreign?.currency ?? (br.prices.length ? "BRL" : null);
   // o checkout da própria plataforma do site não conta como "checkout externo" quando é o mesmo
   const platform = first(PLATFORMS);
   const checkout = first(CHECKOUTS);
@@ -128,6 +163,7 @@ export function analyzeLanding(url: string, html: string, text: string, finalUrl
     pixels: PIXELS.filter(([, re]) => re.test(h)).map(([n]) => n),
     excerpt: text.replace(/\s+/g, " ").trim().slice(0, 1500) || null,
     error: null,
+    currency,
   };
 }
 

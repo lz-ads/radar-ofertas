@@ -27,6 +27,8 @@ const EXTRA: Record<string, Row> = {
   },
   "d:brmoveis.com.br": { platform: "WooCommerce", price_min: 899, price_max: 2490, cod: true, niche: "Casa e decoração", kind: "produto fisico", promise: "Móveis direto da fábrica com pagamento na entrega", risk: "baixo" },
   "d:alwaysfit.com.br": { niche: "Saúde e bem-estar", kind: "nutra", promise: "Mais energia e cabelo forte com suplemento", risk: "alto", risk_reason: "alegações de saúde sem comprovação" },
+  "us:d:glowpatch.com": { platform: "Shopify", checkout: "Shopify", price_min: 39.95, price_max: 89.9, has_vsl: false, pixels: ["Meta", "TikTok"], niche: "Emagrecimento", kind: "produto fisico", promise: "Patch that curbs cravings in 2 weeks", risk: "alto", risk_reason: "promessa de emagrecimento", status: "analisando" },
+  "jp:d:kireilab.jp": { platform: "Shopify", price_min: 980, price_max: 9800, niche: "Beleza e skincare", kind: "produto fisico", promise: "Pele hidratada com rotina simples (assinatura)", risk: "baixo" },
   "d:benditacanfora.com.br": { platform: "Shopify", checkout: "Cartpanda", price_min: 59.9, price_max: 119.7, niche: "Casa e decoração", kind: "produto fisico", promise: "Acabar com mofo e umidade em armários", risk: "baixo", status: "descartada", discarded: true },
 };
 
@@ -44,13 +46,23 @@ const OFFERS: Row[] = [
   ["d:brmoveis.com.br", "BR Móveis", ["BR Móveis"], "brmoveis.com.br", 11, 11, 1, "2026-05-10", ["pagamento na entrega"], "🚨 PREÇO DE FÁBRICA — PAGAMENTO NA ENTREGA! 🚨 Aqui é DIRETO da fábrica.", 11, 2],
   ["a:loja exemplo", "Loja Exemplo", ["Loja Exemplo"], null, 1, 1, 1, "2026-10-20", ["frete grátis"], "Oferta com um anúncio só, sem sinal de escala.", 1, null],
   ["d:benditacanfora.com.br", "Bendita Cânfora", ["Bendita Cânfora", "Cânfora Casa"], "benditacanfora.com.br", 4, 4, 2, "2026-09-29", ["compre 2 leve 3"], "🌿 Sua casa livre daquela sensação de mofo e umidade começa pelos pequenos cantinhos.", null, 74],
+  ["us:d:glowpatch.com", "GlowPatch", ["GlowPatch", "Glow Patch US"], "glowpatch.com", 14, 41, 2, "2026-06-02", ["free shipping", "weight loss"], "The patch everyone is talking about. Buy 2 get 1 free + free shipping today only.", 25, 140],
+  ["us:d:pawsafe.co", "PawSafe", ["PawSafe"], "pawsafe.co", 6, 12, 1, "2026-09-18", ["shop now"], "Your dog deserves joint relief. Vet-formulated chews, 30-day money back guarantee.", 12, 9],
+  ["jp:d:kireilab.jp", "キレイラボ", ["キレイラボ"], "kireilab.jp", 9, 18, 1, "2026-04-11", ["初回限定"], "初回限定 980円！送料無料でお届けします。", 15, 30],
 ].map(([offer_key, advertiser, advertisers, domain, cards, copies, pages, oldest_start, keywords, sample_text, copies_7d, google_ads]) => {
   const c = copies as number, c7 = copies_7d as number | null;
   const growth = c7 === null ? 0 : c - c7;
   const g = (google_ads as number | null) ?? 0;
   const d = domain as string | null;
   const x = EXTRA[offer_key as string] ?? {};
+  const k = offer_key as string;
+  const country = k.match(/^([a-z]{2}):/)?.[1].toUpperCase() ?? "BR";
+  const days = Math.round((Date.now() - Date.parse(oldest_start as string)) / 864e5);
   return {
+    country, currency: { BR: "BRL", US: "USD", JP: "JPY" }[country] ?? "BRL", days_running: days,
+    ads_active: Math.max(Math.round((cards as number) * 0.8), 1), long_runners: days > 60 ? Math.ceil((cards as number) / 4) : 0,
+    new_ads_7d: c7 === null ? (cards as number) : Math.max(growth > 0 ? Math.ceil(growth / 3) : 0, 0), media_count: k === "d:constlivre.com.br" ? 3 : 0,
+    cooling: k === "d:cariani.com.br", watched: k === "d:constlivre.com.br" || k === "us:d:glowpatch.com", has_kit: k === "d:constlivre.com.br",
     dest_type: d ? "site" : advertiser === "Receitas sem Culpa" ? "whatsapp" : "mensagem",
     thumb_path: null, platform: null, checkout: null, price_min: null, price_max: null, installments: null, cod: false, has_vsl: false, pixels: [],
     niche: null, kind: null, audience: null, promise: null, mechanism: null, offer: null, risk: null, risk_reason: null,
@@ -71,13 +83,46 @@ const SNAPSHOTS: Row[] = Array.from({ length: 14 }, (_, i) => ({
 }));
 
 const ADS: Row[] = [
-  { library_id: "1001", advertiser: "ConstLivre", body: "🚨 O Desafio 90 Dias ConstLivre está com uma oportunidade imperdível: Compre 2 LEVE 3 🔥\nNão deixe para depois.", start_date: "2026-07-20", copies: 13, last_seen: today, domain: "constlivre.com.br", offer_key: "d:constlivre.com.br", landing_url: "https://constlivre.com.br/", page_url: null, thumb_url: null, media_type: "image" },
+  { library_id: "1001", media_path: "ads/1001.mp4", video_url: null, advertiser: "ConstLivre", body: "🚨 O Desafio 90 Dias ConstLivre está com uma oportunidade imperdível: Compre 2 LEVE 3 🔥\nNão deixe para depois.", start_date: "2026-07-20", copies: 13, last_seen: today, domain: "constlivre.com.br", offer_key: "d:constlivre.com.br", landing_url: "https://constlivre.com.br/", page_url: null, thumb_url: null, media_type: "image" },
   { library_id: "1002", advertiser: "Juju Salimeni", body: "🚨 A melhor promoção do ConstLivre está no ar!\n✅ Compre 2 caixas e leve 3.", start_date: "2026-08-26", copies: 6, last_seen: today, domain: "constlivre.com.br", offer_key: "d:constlivre.com.br", landing_url: "https://constlivre.com.br/", page_url: null, thumb_url: null, media_type: "image" },
   { library_id: "1003", advertiser: "Renato Cariani", body: "Se você já tentou diversas alternativas e ainda não encontrou uma rotina que faça sentido, talvez esteja na hora de testar.", start_date: "2026-09-25", copies: 4, last_seen: today, domain: "constlivre.com.br", offer_key: "d:constlivre.com.br", landing_url: "https://constlivre.com.br/", page_url: null, thumb_url: null, media_type: "image" },
 ];
 
-const KEYWORDS: Row[] = ["frete grátis", "pagamento na entrega", "acesso imediato", "compre 2 leve 3", "renda extra", "emagrecer", "pague depois", "últimas unidades", "garantia de 30 dias", "comente eu quero", "colágeno", "receitas", "menopausa", "dores", "queda de cabelo"]
-  .map((term, i) => ({ id: i + 1, term, active: i !== 4 }));
+const KEYWORDS: Row[] = [
+  ...["frete grátis", "pagamento na entrega", "acesso imediato", "compre 2 leve 3", "renda extra", "emagrecer", "pague depois", "últimas unidades", "garantia de 30 dias", "comente eu quero", "colágeno", "receitas", "menopausa", "dores", "queda de cabelo"].map((term) => [term, "BR"]),
+  ["free shipping", "US"], ["weight loss", "US"], ["shop now", "US"], ["初回限定", "JP"], ["送料無料", "JP"],
+].map(([term, country], i) => ({ id: i + 1, term, country, active: i !== 4 }));
+
+const KITS: Row[] = [{
+  offer_key: "d:constlivre.com.br", model: "gemini-flash-lite-latest", updated_at: new Date().toISOString(),
+  structure: {
+    resumo: "Kit de fibras para desinchar vendido como desafio de 90 dias, com kits de 1, 3 e 5 meses e influenciadores como prova.",
+    publico: "mulheres 30–50 com barriga inchada", promessa: "Desinchar e perder barriga em 90 dias", mecanismo: "fibras que regulam o intestino", angulo: "desafio + autoridade de influenciador",
+    secoes: [
+      { tipo: "headline", titulo: "Desafio 90 Dias", resumo: "promessa com prazo e foto de antes/depois suave" },
+      { tipo: "vsl", titulo: "Vídeo do Cariani", resumo: "autoridade explica o mecanismo em 4 minutos" },
+      { tipo: "beneficios", titulo: "O que muda no seu corpo", resumo: "6 benefícios com ícones" },
+      { tipo: "prova social", titulo: "Quem já fez", resumo: "depoimentos em vídeo de clientes" },
+      { tipo: "oferta", titulo: "Escolha seu kit", resumo: "3 kits, o do meio destacado como mais vendido" },
+      { tipo: "garantia", titulo: "30 dias", resumo: "devolução sem perguntas" },
+      { tipo: "faq", titulo: "Dúvidas", resumo: "8 perguntas sobre uso e entrega" },
+    ],
+    oferta: { kits: [{ nome: "1 mês", preco: "R$ 197" }, { nome: "3 meses (compre 2 leve 3)", preco: "R$ 297" }, { nome: "5 meses", preco: "R$ 497" }], bonus: ["guia de receitas", "grupo VIP"], garantia: "30 dias", frete: "grátis", pagamento: "pix, cartão 12x", escassez: "cupom do dia" },
+    provas: ["influenciadores", "depoimentos em vídeo", "número de clientes"], objecoes: ["preço", "demora para ver resultado", "sabor"], ctas: ["QUERO MEU KIT", "COMEÇAR O DESAFIO"],
+    funil: "anúncio → página com VSL → checkout Yampi → order bump de coqueteleira", ideias_de_teste: ["ângulo de desafio com amiga", "kit de entrada mais barato", "UGC de rotina matinal", "garantia estendida", "quiz antes da página"],
+  },
+  my_input: { produto: "Chá detox de hibisco", marca: "Lux Chá", preco: "R$ 97", diferencial: "", publico: "", idioma: "português do Brasil" },
+  my_version: "## Página de vendas\n\n### 1. Headline\n**Desafio 30 Dias Lux Chá: menos inchaço, mais disposição**\n…\n\n## 10 ganchos\n1. \"Eu tomava 3 cafés por dia até descobrir isso…\"\n2. …",
+  my_model: "gemini-flash-lite-latest", my_updated_at: new Date().toISOString(),
+}];
+
+const TRANSCRIPTS: Row[] = [{ library_id: "1001", hook: "\"Pare de cortar o pão\" — mulher na cozinha segurando o pote", structure: "gancho → problema → autoridade → demonstração → oferta compre 2 leve 3 → chamada", cta: "Clique em saiba mais e garanta o kit", transcript: "Pare de cortar o pão. O problema não é o pão…" }];
+
+const WATCH: Row[] = [
+  { id: 1, offer_key: "d:constlivre.com.br", label: "ConstLivre", term: "constlivre.com.br", country: "BR", created_at: new Date().toISOString() },
+  { id: 2, offer_key: "us:d:glowpatch.com", label: "GlowPatch", term: "glowpatch.com", country: "US", created_at: new Date().toISOString() },
+  { id: 3, offer_key: null, label: "concorrente.com.br", term: "concorrente.com.br", country: "BR", created_at: new Date().toISOString() },
+];
 
 const IGNORED: Row[] = ["Shopee", "Mercado Livre", "AliExpress", "InfinitePay", "O Boticário", "Natura", "Amazon.com.br", "SHEIN Brasil"].map((name) => ({ name }));
 
@@ -99,13 +144,14 @@ const RUNS: Row[] = [
   { id: 2, source: "meta", ok: false, items: 0, message: "A Meta pediu login para a busca — o IP do robô pode ter sido bloqueado.", finished_at: minsAgo(60 * 9) },
 ];
 const LANDINGS: Row[] = [
-  { url: "https://constlivre.com.br/kit-desafio-90-dias", title: "Desafio 90 Dias ConstLivre", platform: "Shopify", checkout: "Yampi", prices: [197, 297, 497], price_min: 197, price_max: 497, installments: "12x de R$ 41,42", cod: false, has_vsl: true, has_countdown: true, has_whatsapp: true, pixels: ["Meta", "TikTok", "GTM"], error: null, checked_at: minsAgo(41) },
+  { url: "https://constlivre.com.br/kit-desafio-90-dias", shot_path: "p/demo.webp", currency: "BRL", title: "Desafio 90 Dias ConstLivre", platform: "Shopify", checkout: "Yampi", prices: [197, 297, 497], price_min: 197, price_max: 497, installments: "12x de R$ 41,42", cod: false, has_vsl: true, has_countdown: true, has_whatsapp: true, pixels: ["Meta", "TikTok", "GTM"], error: null, checked_at: minsAgo(41) },
 ];
 
 const TABLES: Record<string, Row[]> = {
   offer_ranking: OFFERS, offer_snapshots: SNAPSHOTS, ads: ADS, keywords: KEYWORDS,
   ignored_advertisers: IGNORED, ra_new_companies: RA, runs: RUNS,
   landing_pages: LANDINGS, offer_aliases: [], offer_insights: [], alerts_sent: [],
+  offer_kits: KITS, ad_transcripts: TRANSCRIPTS, watchlist: WATCH,
   offer_notes: OFFERS.filter((o) => o.status).map((o) => ({ offer_key: o.offer_key, status: o.status, note: o.note, updated_at: today })),
 };
 
@@ -164,6 +210,8 @@ class Query implements PromiseLike<{ data: Row[] | Row | null; error: null; coun
   is(col: string, v: null) { this.rows = this.rows.filter((r) => r[col] === v || r[col] === undefined); return this; }
   lte(col: string, v: number) { this.rows = this.rows.filter((r) => r[col] !== null && r[col] !== undefined && Number(r[col]) <= v); return this; }
   like() { return this; }
+  neq(col: string, v: unknown) { this.rows = this.rows.filter((r) => r[col] !== v); return this; }
+  ilike() { return this; }
   delete() { return this; }
   maybeSingle() { this.single = true; return this; }
   upsert() { return this; }

@@ -86,6 +86,7 @@ export class MetaBrowserSource implements MetaAdSource {
       ad.landingUrl = cleanLandingUrl(l.landing);
       ad.thumbUrl = l.thumb;
       ad.mediaType = l.media;
+      ad.videoUrl = l.video ?? null;
       // sem domínio no texto: usa o do link de destino
       if (!ad.domain || isGenericDomain(ad.domain)) {
         const host = hostOf(ad.landingUrl);

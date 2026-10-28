@@ -40,6 +40,7 @@ export function mergeAds(results: KeywordResult[], ignored: Set<string>): AdWith
         prev.pageUrl ??= ad.pageUrl;
         prev.thumbUrl ??= ad.thumbUrl;
         prev.cta ??= ad.cta;
+        prev.videoUrl ??= ad.videoUrl;
       } else {
         const a: AdWithMeta = { ...ad, offerKey: offerKeyFor(ad), keywords: [r.keyword] };
         // card sem link mas com domínio próprio: usa a página inicial do domínio
@@ -141,6 +142,34 @@ export function buildSnapshots(ads: AdWithMeta[]): OfferSnapshot[] {
     });
   }
   return snaps.sort((a, b) => b.copies + 2 * b.cards - (a.copies + 2 * a.cards));
+}
+
+/**
+ * Ofertas de outros países ganham o país na frente da chave ("us:d:loja.com"); as do Brasil ficam como sempre.
+ * Assim a mesma loja anunciando no Brasil e nos EUA aparece separada em cada ranking.
+ */
+export function scopeKey(key: string, country: string): string {
+  const c = country.toUpperCase();
+  return c === "BR" ? key : `${c.toLowerCase()}:${key}`;
+}
+
+/** País de uma chave de oferta ("us:d:loja.com" -> "US"). */
+export function countryOfKey(key: string): string {
+  const m = key.match(/^([a-z]{2}):[ad]:/);
+  return m ? m[1].toUpperCase() : "BR";
+}
+
+/** Chave sem o país ("us:d:loja.com" -> "d:loja.com"). */
+export const rawKey = (key: string) => key.replace(/^[a-z]{2}:(?=[ad]:)/, "");
+
+/** Aplica o país às chaves dos anúncios, fotos do dia e apelidos (depois de agrupar). */
+export function applyCountry(country: string, ads: AdWithMeta[], snaps: OfferSnapshot[], aliases: OfferAlias[]) {
+  for (const a of ads) a.offerKey = scopeKey(a.offerKey, country);
+  for (const s of snaps) s.offerKey = scopeKey(s.offerKey, country);
+  for (const al of aliases) {
+    al.alias = scopeKey(al.alias, country);
+    al.target = scopeKey(al.target, country);
+  }
 }
 
 /** Sinal mínimo de escala (mesma regra do painel). */

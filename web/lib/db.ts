@@ -55,7 +55,40 @@ export interface OfferRow {
   status: Status | null;
   note: string | null;
   discarded: boolean;
+  // Fase 1
+  country: string;
+  days_running: number | null;
+  ads_active: number;
+  long_runners: number;
+  new_ads_7d: number;
+  media_count: number;
+  cooling: boolean;
+  watched: boolean;
+  has_kit: boolean;
+  currency: string | null;
 }
+
+/** Países que o robô sabe buscar (dá para adicionar outros nas palavras-chave). */
+export const COUNTRIES: Record<string, { flag: string; name: string; locale: string; currency: string }> = {
+  BR: { flag: "🇧🇷", name: "Brasil", locale: "pt-BR", currency: "BRL" },
+  US: { flag: "🇺🇸", name: "Estados Unidos", locale: "en-US", currency: "USD" },
+  GB: { flag: "🇬🇧", name: "Reino Unido", locale: "en-GB", currency: "GBP" },
+  PT: { flag: "🇵🇹", name: "Portugal", locale: "pt-PT", currency: "EUR" },
+  JP: { flag: "🇯🇵", name: "Japão", locale: "ja-JP", currency: "JPY" },
+  ES: { flag: "🇪🇸", name: "Espanha", locale: "es-ES", currency: "EUR" },
+  MX: { flag: "🇲🇽", name: "México", locale: "es-MX", currency: "MXN" },
+  CA: { flag: "🇨🇦", name: "Canadá", locale: "en-CA", currency: "CAD" },
+  AU: { flag: "🇦🇺", name: "Austrália", locale: "en-AU", currency: "AUD" },
+};
+export const countryName = (c: string | null | undefined) => COUNTRIES[(c || "BR").toUpperCase()]?.name ?? (c || "BR");
+export const flag = (c: string | null | undefined) => COUNTRIES[(c || "BR").toUpperCase()]?.flag ?? (c || "").toUpperCase();
+
+/** País de uma chave ("us:d:loja.com" -> "US"). */
+export const countryOfKey = (key: string) => key.match(/^([a-z]{2}):[ad]:/)?.[1].toUpperCase() ?? "BR";
+/** Nome legível de uma chave ("us:d:loja.com" -> "loja.com"). */
+export const keyLabel = (key: string) => key.replace(/^[a-z]{2}:(?=[ad]:)/, "").slice(2);
+/** Chave válida de oferta (com ou sem país na frente). */
+export const validKey = (k: string) => /^(?:[a-z]{2}:)?[ad]:[^\s]{1,200}$/.test(k);
 
 export type DestType = "site" | "whatsapp" | "instagram" | "formulario" | "mensagem" | "app" | "ligacao";
 export const DEST_LABEL: Record<DestType, string> = {
@@ -72,19 +105,34 @@ export const KIND_LABEL: Record<string, string> = {
   "produto fisico": "produto físico", infoproduto: "infoproduto", nutra: "nutra", servico: "serviço", app: "app", outro: "outro",
 };
 
+/** Endereço público de um arquivo no Storage do Supabase (com `download`, o navegador baixa em vez de abrir). */
+export function storageUrl(bucket: string, path: string, download?: string): string | null {
+  if (!process.env.SUPABASE_URL) return null;
+  const base = `${process.env.SUPABASE_URL.replace(/\/$/, "")}/storage/v1/object/public/${bucket}/${path}`;
+  return download ? `${base}?download=${encodeURIComponent(download)}` : base;
+}
+
 /** Endereço público da imagem guardada no Storage, ou o link original do Facebook. */
 export function creativeSrc(path: string | null | undefined, fallback: string | null | undefined): string | null {
-  if (path && process.env.SUPABASE_URL) return `${process.env.SUPABASE_URL.replace(/\/$/, "")}/storage/v1/object/public/criativos/${path}`;
+  if (path) return storageUrl("criativos", path) ?? fallback ?? null;
   return fallback ?? null;
 }
 
-const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
-/** "R$ 97" ou "R$ 97 – 297" */
-export function priceRange(min: number | string | null, max: number | string | null): string | null {
+/** "R$ 97" ou "R$ 97 – 297" (na moeda da página: US$, £, €, ¥...) */
+export function priceRange(min: number | string | null, max: number | string | null, currency: string | null = "BRL"): string | null {
   if (min === null || min === undefined) return null;
+  const cur = currency || "BRL";
   const a = Number(min), b = Number(max ?? min);
-  const f = (n: number) => brl.format(n).replace(",00", "");
-  return a === b ? f(a) : `${f(a)} – ${f(b).replace("R$", "").trim()}`;
+  let fmt: Intl.NumberFormat;
+  try {
+    fmt = new Intl.NumberFormat(cur === "BRL" ? "pt-BR" : "en-US", { style: "currency", currency: cur, maximumFractionDigits: cur === "JPY" ? 0 : 2 });
+  } catch {
+    fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
+  }
+  const f = (n: number) => fmt.format(n).replace(/[,.]00$/, "");
+  if (a === b) return f(a);
+  const sym = fmt.formatToParts(0).find((p) => p.type === "currency")?.value ?? "";
+  return `${f(a)} – ${f(b).replace(sym, "").trim()}`;
 }
 
 /** "https://www.loja.com.br/products/kit-3?variant=1" -> "loja.com.br/products/kit-3" */
@@ -100,5 +148,8 @@ export function shortUrl(url: string, max = 38): string {
 
 export const fmtDate = (d: string | null) => (d ? d.split("-").reverse().join("/") : "—");
 
-export const libraryLink = (q: string) =>
-  `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=BR&search_type=keyword_unordered&q=${encodeURIComponent(q)}`;
+export const libraryLink = (q: string, country = "BR") =>
+  `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&search_type=keyword_unordered&q=${encodeURIComponent(q)}`;
+
+/** "há 45 dias" */
+export const daysLabel = (d: number | null | undefined) => (d === null || d === undefined ? "—" : d <= 0 ? "hoje" : d === 1 ? "1 dia" : `${d} dias`);

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { creativeSrc, db, priceRange, STATUSES, STATUS_LABEL, type OfferRow, type Status } from "@/lib/db";
+import { creativeSrc, db, priceRange, STATUSES, STATUS_LABEL, type OfferRow, type Status, keyLabel } from "@/lib/db";
 import { setStatus } from "../actions";
 import { Thumb } from "../bits";
 
@@ -46,7 +46,7 @@ export default async function Funil() {
                     <div className="dim mono card-meta">
                       score {o.score}
                       {o.copies_7d !== null && o.copies_growth > 0 && <span className="up"> ▲{o.copies_growth}</span>}
-                      {o.price_min !== null && <> · {priceRange(o.price_min, o.price_max)}</>}
+                      {o.price_min !== null && <> · {priceRange(o.price_min, o.price_max, o.currency)}</>}
                     </div>
                     {o.niche && <div className="dim card-meta">{o.niche}</div>}
                     {o.note && <p className="card-note">{o.note.slice(0, 140)}</p>}
@@ -62,7 +62,7 @@ export default async function Funil() {
               {old.map((g) => (
                 <article key={g.offer_key} className="card gone">
                   <div className="card-body">
-                    <Link className="offer-name" href={`/oferta/${encodeURIComponent(g.offer_key)}`}>{g.offer_key.slice(2)}</Link>
+                    <Link className="offer-name" href={`/oferta/${encodeURIComponent(g.offer_key)}`}>{keyLabel(g.offer_key)}</Link>
                     <div className="dim card-meta">parou de aparecer nas coletas</div>
                     {g.note && <p className="card-note">{g.note.slice(0, 140)}</p>}
                   </div>

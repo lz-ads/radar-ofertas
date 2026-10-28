@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { creativeSrc, db, DEST_LABEL, fmtDate, KIND_LABEL, libraryLink, priceRange, shortUrl, type DestType, type OfferRow } from "@/lib/db";
+import { COUNTRIES, countryName, creativeSrc, db, DEST_LABEL, flag, fmtDate, KIND_LABEL, libraryLink, priceRange, shortUrl, type DestType, type OfferRow } from "@/lib/db";
 import { countAll, hrefWith, isFiltered, PAGE_SIZE, parseFilters, queryOffers, STRONG_SIGNAL, type Filters, type SortKey } from "@/lib/query";
 import { toggleFavorite } from "./actions";
 import { CopyButton, Thumb } from "./bits";
@@ -27,7 +27,7 @@ function SortTh({ f, k, label, num, title }: { f: Filters; k: SortKey; label: st
   );
 }
 
-type FacetRow = Pick<OfferRow, "keywords" | "niche" | "kind" | "dest_type" | "checkout" | "platform">;
+type FacetRow = Pick<OfferRow, "keywords" | "niche" | "kind" | "dest_type" | "checkout" | "platform" | "country">;
 
 /** Conta valores para os seletores de filtro (só mostra opções que existem). */
 function facet(rows: FacetRow[], pick: (r: FacetRow) => (string | null)[], label: (v: string) => string = (v) => v) {
@@ -40,14 +40,15 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
   const f = parseFilters(await searchParams);
   const client = db();
 
-  const [{ offers, error, total }, withWeak, { data: kws }, { data: facetRows }, { data: lastRun }, { count: totalAll }, { count: growingAll }] = await Promise.all([
+  const kwQuery = client.from("keywords").select("term").eq("active", true).order("term");
+  const growQuery = client.from("offer_ranking").select("offer_key", { count: "exact", head: true }).gt("copies_growth", 0);
+  const [{ offers, error, total }, withWeak, { data: kws }, { data: allRows }, { data: lastRun }, { count: growingAll }] = await Promise.all([
     queryOffers(client, f),
     countAll(client, f),
-    client.from("keywords").select("term").eq("active", true).order("term"),
-    client.from("offer_ranking").select("keywords, niche, kind, dest_type, checkout, platform").eq("discarded", false).or(STRONG_SIGNAL).limit(2000),
+    f.pais === "todos" ? kwQuery : kwQuery.eq("country", f.pais),
+    client.from("offer_ranking").select("keywords, niche, kind, dest_type, checkout, platform, country").eq("discarded", false).or(STRONG_SIGNAL).limit(5000),
     client.from("runs").select("source, ok, finished_at").eq("source", "meta").order("id", { ascending: false }).limit(1),
-    client.from("offer_ranking").select("offer_key", { count: "exact", head: true }).eq("discarded", false).or(STRONG_SIGNAL),
-    client.from("offer_ranking").select("offer_key", { count: "exact", head: true }).gt("copies_growth", 0),
+    f.pais === "todos" ? growQuery : growQuery.eq("country", f.pais),
   ]);
 
   if (error) {
@@ -59,7 +60,18 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
     );
   }
 
-  const rows = (facetRows ?? []) as FacetRow[];
+  const everyRow = (allRows ?? []) as FacetRow[];
+  // contagem por país (seletor) e facetas só do país escolhido
+  const byCountry = new Map<string, number>();
+  for (const r of everyRow) byCountry.set(r.country ?? "BR", (byCountry.get(r.country ?? "BR") ?? 0) + 1);
+  const countryOpts = [...new Set(["BR", ...byCountry.keys()])]
+    .sort((a, b) => (a === "BR" ? -1 : b === "BR" ? 1 : (byCountry.get(b) ?? 0) - (byCountry.get(a) ?? 0)))
+    .map((c) => ({ value: c, label: `${flag(c)} ${countryName(c)}`, count: byCountry.get(c) ?? 0 }));
+  const rows = f.pais === "todos" ? everyRow : everyRow.filter((r) => (r.country ?? "BR") === f.pais);
+  const totalAll = rows.length;
+  const cur = f.pais === "todos" ? null : COUNTRIES[f.pais]?.currency ?? null;
+  const currencySymbol = cur ? (new Intl.NumberFormat("en-US", { style: "currency", currency: cur }).formatToParts(0).find((p) => p.type === "currency")?.value ?? cur) : "";
+  const placeName = f.pais === "todos" ? "no mundo" : f.pais === "BR" ? "no Brasil" : `em ${countryName(f.pais)}`;
   const counts = new Map<string, number>();
   for (const r of rows) for (const k of r.keywords ?? []) counts.set(k, (counts.get(k) ?? 0) + 1);
   const keywordChips = ((kws ?? []) as { term: string }[])
@@ -82,8 +94,8 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
     <>
       <section className="hero">
         <div>
-          <p className="comment">{"// meta · google · reclame aqui — brasil"}</p>
-          <h1>Ofertas escalando no Brasil</h1>
+          <p className="comment">{`// meta · google${f.pais === "BR" ? " · reclame aqui" : ""} — ${f.pais === "todos" ? "todos os países" : countryName(f.pais).toLowerCase()}`}</p>
+          <h1>Ofertas escalando {placeName}</h1>
           <p className="lede">
             Quem está duplicando criativo, abrindo páginas novas e anunciando no Google ao mesmo tempo. O ranking soma esses sinais e
             destaca quem acelerou na última semana.
@@ -110,7 +122,7 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
       </section>
 
       <Suspense>
-        <FilterBar keywords={keywordChips} facets={facets} shown={offers.length} total={total} hiddenWeak={withWeak === null ? 0 : withWeak - total} exportHref={exportHref} />
+        <FilterBar countries={countryOpts} currencySymbol={currencySymbol || "R$"} keywords={keywordChips} facets={facets} shown={offers.length} total={total} hiddenWeak={withWeak === null ? 0 : withWeak - total} exportHref={exportHref} />
       </Suspense>
 
       <div className="grid">
@@ -125,13 +137,13 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
               <SortTh f={f} k="crescimento" label="7d" num title="Cópias novas contra 7 dias atrás" />
               <SortTh f={f} k="paginas" label="paginas" num title="Páginas do Facebook rodando a mesma oferta" />
               <SortTh f={f} k="google" label="google" num title="Anúncios no Centro de Transparência do Google" />
-              <SortTh f={f} k="desde" label="desde" title="Anúncio ativo mais antigo" />
+              <SortTh f={f} k="desde" label="desde" title="Anúncio ativo mais antigo (e há quantos dias está no ar)" />
               <SortTh f={f} k="preco" label="pagina_de_vendas" title="Ordena pelo menor preço encontrado na página" />
             </tr>
           </thead>
           <tbody>
             {offers.map((o, i) => {
-              const price = priceRange(o.price_min, o.price_max);
+              const price = priceRange(o.price_min, o.price_max, o.currency);
               const meta = [o.niche, o.kind ? KIND_LABEL[o.kind] ?? o.kind : null].filter(Boolean);
               return (
                 <tr key={o.offer_key} className={o.status ? `st-${o.status}` : undefined}>
@@ -153,11 +165,16 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
                   <td className="offer-cell">
                     <Thumb src={creativeSrc(o.thumb_path, o.thumb_url)} alt={`Criativo de ${o.advertiser}`} />
                     <div className="offer-main">
+                      {f.pais === "todos" && <span className="flag" title={countryName(o.country)}>{flag(o.country)}</span>}
                       <Link className="offer-name" href={`/oferta/${encodeURIComponent(o.offer_key)}`}>{o.advertiser}</Link>
                       {o.domain && <span className="domain">{o.domain}</span>}
-                      {(meta.length > 0 || o.risk === "alto" || (o.status && o.status !== "favorita")) && (
+                      {(meta.length > 0 || o.risk === "alto" || (o.status && o.status !== "favorita") || o.long_runners > 0 || o.cooling || o.watched || o.has_kit) && (
                         <div className="meta-line">
                           {meta.map((m) => <span key={m}>{m}</span>)}
+                          {o.long_runners > 0 && <span className="badge ok" title={`${o.long_runners} anúncio(s) rodando há 30+ dias: sinal de oferta validada`}>✓ 30d+ ×{o.long_runners}</span>}
+                          {o.cooling && <span className="badge cold" title="Cópias caindo forte contra 7 dias atrás">🧊 esfriando</span>}
+                          {o.watched && <span className="badge" title="Na sua lista de espionagem">👁</span>}
+                          {o.has_kit && <Link className="badge" href={`/oferta/${encodeURIComponent(o.offer_key)}#kit`} title="Kit de modelagem pronto">kit</Link>}
                           {o.risk === "alto" && <span className="risk" title={o.risk_reason ?? "Promessa arriscada para as políticas de anúncio"}>⚠ risco alto</span>}
                           {o.status && o.status !== "favorita" && <span className="pill">{o.status}</span>}
                         </div>
@@ -184,7 +201,10 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
                   </td>
                   <td className="n">{o.pages}</td>
                   <td className="n">{o.google_ads ?? <span className="dim">—</span>}</td>
-                  <td className="mono date">{fmtDate(o.oldest_start)}</td>
+                  <td className="mono date">
+                    {fmtDate(o.oldest_start)}
+                    {o.days_running !== null && o.days_running !== undefined && <div className={`days${o.days_running >= 30 ? " long" : ""}`}>{o.days_running} dias</div>}
+                  </td>
                   <td className="landing">
                     {o.landing_url ? (
                       <span className="landing-wrap">
@@ -204,7 +224,7 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
                     )}
                     <div className="sublinks">
                       {o.page_url && <a href={o.page_url} target="_blank" rel="noreferrer" title="Página do anunciante no Facebook">página fb ↗</a>}
-                      <a href={libraryLink(o.domain ?? o.advertiser)} target="_blank" rel="noreferrer" title="Anúncios ativos na Biblioteca da Meta">biblioteca ↗</a>
+                      <a href={libraryLink(o.domain ?? o.advertiser, o.country)} target="_blank" rel="noreferrer" title="Anúncios ativos na Biblioteca da Meta">biblioteca ↗</a>
                     </div>
                   </td>
                 </tr>

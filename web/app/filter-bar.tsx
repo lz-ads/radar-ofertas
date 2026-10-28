@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 type Opt = { value: string; label: string; count?: number };
 
 interface Props {
+  countries: Opt[];
+  currencySymbol: string;
   keywords: { term: string; count: number }[];
   facets: { nicho: Opt[]; tipo: Opt[]; destino: Opt[]; checkout: Opt[] };
   shown: number;
@@ -21,14 +23,12 @@ const TOGGLES = [
   { key: "site", label: "com página de vendas" },
   { key: "cod", label: "pagamento na entrega" },
   { key: "vsl", label: "com VSL" },
+  { key: "validadas", label: "validadas (30+ dias)" },
+  { key: "esfriando", label: "esfriando" },
+  { key: "espionadas", label: "👁 espionadas" },
 ] as const;
 
-const PRICES = [
-  { value: "50", label: "até R$ 50" },
-  { value: "100", label: "até R$ 100" },
-  { value: "200", label: "até R$ 200" },
-  { value: "500", label: "até R$ 500" },
-];
+const PRICES = [50, 100, 200, 500];
 
 const RISKS = [
   { value: "baixo", label: "risco baixo" },
@@ -50,7 +50,7 @@ const STATUS = [
  * Barra de filtros ao vivo: cada mudança atualiza a URL (sem botão "Filtrar").
  * A busca espera o usuário parar de digitar; o resto aplica na hora.
  */
-export function FilterBar({ keywords, facets, shown, total, hiddenWeak, exportHref }: Props) {
+export function FilterBar({ countries, currencySymbol, keywords, facets, shown, total, hiddenWeak, exportHref }: Props) {
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
@@ -89,6 +89,7 @@ export function FilterBar({ keywords, facets, shown, total, hiddenWeak, exportHr
 
   const kw = params.get("kw") ?? "";
   const SELECTS = ["nicho", "tipo", "destino", "checkout", "preco", "risco", "status"] as const;
+  const pais = (params.get("pais") ?? "BR").toUpperCase() === "TODOS" ? "todos" : (params.get("pais") ?? "BR").toUpperCase();
   const anyFilter = !!(params.get("q") || kw || TOGGLES.some((t) => params.get(t.key)) || SELECTS.some((k) => params.get(k)));
   const todas = params.get("todas") === "1";
 
@@ -125,11 +126,22 @@ export function FilterBar({ keywords, facets, shown, total, hiddenWeak, exportHr
       </div>
 
       <div className="fb-row facets" role="group" aria-label="Filtrar por">
+        {countries.length > 1 && (
+          <label className={`facet country${pais !== "BR" ? " on" : ""}`}>
+            <span className="sr-only">país</span>
+            <select value={pais} onChange={(e) => push({ pais: e.target.value === "BR" ? null : e.target.value, kw: null })} aria-label="País">
+              {countries.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}{c.count !== undefined ? ` (${c.count})` : ""}</option>
+              ))}
+              <option value="todos">🌎 todos os países</option>
+            </select>
+          </label>
+        )}
         {facets.nicho.length > 0 && <Select name="nicho" label="nicho" opts={facets.nicho} />}
         {facets.tipo.length > 0 && <Select name="tipo" label="tipo" opts={facets.tipo} />}
         {facets.destino.length > 0 && <Select name="destino" label="destino" opts={facets.destino} />}
         {facets.checkout.length > 0 && <Select name="checkout" label="plataforma" opts={facets.checkout} />}
-        <Select name="preco" label="preço" opts={PRICES} />
+        <Select name="preco" label="preço" opts={PRICES.map((v) => ({ value: String(v), label: `até ${currencySymbol} ${v}` }))} />
         <Select name="risco" label="risco" opts={RISKS} />
         <Select name="status" label="funil" opts={STATUS} />
       </div>

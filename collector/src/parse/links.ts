@@ -48,7 +48,10 @@ export function hostOf(url: string | null): string | null {
   }
 }
 
-export type CardLinks = Record<string, { page: string | null; landing: string | null; thumb: string | null; media: "image" | "video" | null }>;
+export type CardLinks = Record<
+  string,
+  { page: string | null; landing: string | null; thumb: string | null; video?: string | null; media: "image" | "video" | null }
+>;
 
 /**
  * Script que roda dentro da página da Biblioteca: para cada card, devolve página do anunciante,
@@ -71,7 +74,13 @@ export const CARD_LINKS_SCRIPT = `(() => {
     const landing = (anchors.find((a) => /l\\.facebook\\.com\\/l\\.php\\?u=/.test(a.href)) || {}).href || null;
     const video = card.querySelector("video");
     const img = Array.from(card.querySelectorAll("img")).find((i) => (i.naturalWidth || i.width) > 120);
-    out[id] = { page, landing, thumb: (video && video.poster) || (img && img.src) || null, media: video ? "video" : img ? "image" : null };
+    const vsrc = video ? (video.currentSrc || video.src || ((video.querySelector("source") || {}).src) || null) : null;
+    out[id] = {
+      page, landing,
+      thumb: (video && video.poster) || (img && img.src) || null,
+      video: vsrc && /^https:/.test(vsrc) ? vsrc : null,
+      media: video ? "video" : img ? "image" : null,
+    };
   }
   return out;
 })()`;

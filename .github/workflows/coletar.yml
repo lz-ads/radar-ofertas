@@ -7,7 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Rodar só algumas etapas (meta, criativos, google, ra, paginas, ia, alertas), separadas por vírgula. Vazio roda tudo."
+        description: "Rodar só algumas etapas (meta, criativos, midia, google, ra, paginas, ia, kit, transcricao, alertas), separadas por vírgula. Vazio roda tudo."
+        required: false
+        default: ""
+      paises:
+        description: "Só estes países na busca da Meta (ex.: BR,US). Vazio = todos com palavra-chave ativa."
         required: false
         default: ""
 
@@ -21,7 +25,7 @@ permissions:
 jobs:
   coletar:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     defaults:
       run:
         working-directory: collector
@@ -51,6 +55,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PANEL_URL: ${{ vars.PANEL_URL }}
           ONLY: ${{ github.event.inputs.only }}
+          META_COUNTRIES: ${{ github.event.inputs.paises }}
         run: |
           if [ -n "$ONLY" ]; then
             npm run collect -- "--only=$ONLY"

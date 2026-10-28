@@ -23,6 +23,11 @@ export interface Filters {
   vsl: boolean;
   /** status do funil; "todos" mostra também as descartadas */
   status: string;
+  /** país (BR por padrão; "todos" junta todos) */
+  pais: string;
+  validadas: boolean;  // anúncios rodando há 30+ dias
+  esfriando: boolean;  // cópias caindo forte na semana
+  espionadas: boolean; // na lista de espionagem
   limit: number;
 }
 
@@ -39,16 +44,26 @@ export const SORTS = {
   desde: "oldest_start",
   nome: "advertiser",
   preco: "price_min",
+  validadas: "long_runners",
+  dias: "days_running",
 } as const satisfies Record<string, keyof OfferRow>;
 export type SortKey = keyof typeof SORTS;
 
 export const PAGE_SIZE = 100;
 const MAX = 1000;
 const ASC_DEFAULT: SortKey[] = ["nome", "desde", "preco"];
+export const ascDefault = (k: SortKey) => ASC_DEFAULT.includes(k);
 
 type Raw = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const clean = (v: string, n = 60) => v.replace(/[,()%*\\]/g, " ").trim().slice(0, n);
+
+/** "us" -> "US"; "todos" fica "todos"; qualquer outra coisa vira Brasil. */
+export function parsePais(v: string): string {
+  const up = v.trim().toUpperCase();
+  if (up === "TODOS") return "todos";
+  return /^[A-Z]{2}$/.test(up) ? up : "BR";
+}
 
 export function parseFilters(sp: Raw): Filters {
   const sort = (Object.keys(SORTS).includes(one(sp.ordem)) ? one(sp.ordem) : "score") as SortKey;
@@ -76,6 +91,10 @@ export function parseFilters(sp: Raw): Filters {
     cod: one(sp.cod) === "1",
     vsl: one(sp.vsl) === "1",
     status: status === "todos" || (STATUSES as readonly string[]).includes(status) || status === "funil" ? status : "",
+    pais: parsePais(one(sp.pais)),
+    validadas: one(sp.validadas) === "1",
+    esfriando: one(sp.esfriando) === "1",
+    espionadas: one(sp.espionadas) === "1",
     limit: Number.isFinite(n) && n > 0 ? Math.min(Math.round(n), MAX) : PAGE_SIZE,
   };
 }
@@ -89,7 +108,8 @@ export function hrefWith(f: Filters, patch: Partial<Filters>, path = "/"): strin
   if (m.sort !== "score") p.set("ordem", m.sort);
   const defaultDir = ASC_DEFAULT.includes(m.sort) ? "asc" : "desc";
   if (m.dir !== defaultDir) p.set("dir", m.dir);
-  for (const k of ["novas", "crescendo", "google", "site", "todas", "cod", "vsl"] as const) if (m[k]) p.set(k, "1");
+  for (const k of ["novas", "crescendo", "google", "site", "todas", "cod", "vsl", "validadas", "esfriando", "espionadas"] as const) if (m[k]) p.set(k, "1");
+  if (m.pais && m.pais !== "BR") p.set("pais", m.pais);
   for (const k of ["nicho", "tipo", "destino", "checkout", "risco", "status"] as const) if (m[k]) p.set(k, m[k]);
   if (m.preco) p.set("preco", String(m.preco));
   if (m.limit !== PAGE_SIZE) p.set("n", String(m.limit));
@@ -98,7 +118,7 @@ export function hrefWith(f: Filters, patch: Partial<Filters>, path = "/"): strin
 }
 
 export function isFiltered(f: Filters) {
-  return !!(f.q || f.kw || f.novas || f.crescendo || f.google || f.site || f.nicho || f.tipo || f.destino || f.checkout || f.preco || f.risco || f.cod || f.vsl || f.status);
+  return !!(f.q || f.kw || f.novas || f.crescendo || f.google || f.site || f.nicho || f.tipo || f.destino || f.checkout || f.preco || f.risco || f.cod || f.vsl || f.status || f.validadas || f.esfriando || f.espionadas);
 }
 
 /** Consulta do ranking com os filtros aplicados. Devolve também o total (para "mostrar mais"). */
@@ -125,6 +145,10 @@ export async function queryOffers(client: SupabaseClient, f: Filters, limit = f.
   if (f.risco) query = query.eq("risk", f.risco);
   if (f.cod) query = query.eq("cod", true);
   if (f.vsl) query = query.eq("has_vsl", true);
+  if (f.pais !== "todos") query = query.eq("country", f.pais);
+  if (f.validadas) query = query.gt("long_runners", 0);
+  if (f.esfriando) query = query.eq("cooling", true);
+  if (f.espionadas) query = query.eq("watched", true);
   // funil: descartadas ficam fora do ranking, a não ser que peça
   if (f.status === "funil") query = query.not("status", "is", null).eq("discarded", false);
   else if (f.status && f.status !== "todos") query = query.eq("status", f.status);
