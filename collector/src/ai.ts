@@ -122,26 +122,28 @@ export async function classifyBatch(
   apiKey: string,
   models: string[],
   doFetch: Fetch = fetch,
-  timeoutMs = 75_000,
+  timeoutMs = 90_000,
 ): Promise<{ insights: Insight[]; model: string }> {
   const prompt = buildPrompt(batch);
-  // sem "pensar": a tarefa é simples e o modo de raciocínio deixa a resposta lenta demais
-  const makeBody = (noThinking: boolean) =>
+  // pouco "raciocínio": a tarefa é simples e o modo de pensar deixa a resposta lenta demais.
+  // Cada geração de modelo aceita uma opção diferente; se uma der erro 400, tenta a próxima.
+  const THINKING: (object | null)[] = [{ thinkingLevel: "low" }, { thinkingBudget: 0 }, null];
+  const makeBody = (variant: number) =>
     JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.2,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        ...(noThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        ...(THINKING[variant] ? { thinkingConfig: THINKING[variant] } : {}),
       },
     });
   const errs: string[] = [];
   let lastErr = "";
   for (const model of models) {
-    let noThinking = true;
+    let variant = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
-      const body = makeBody(noThinking);
+      const body = makeBody(variant);
       let res: Response;
       try {
         res = await doFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -165,18 +167,14 @@ export async function classifyBatch(
         lastErr = `${model}: modelo não encontrado`;
         break; // tenta o próximo modelo
       }
-      if (res.status === 400 && noThinking) {
-        const t = await res.text();
-        if (/thinking/i.test(t)) {
-          noThinking = false; // modelo não aceita desligar o raciocínio: tenta sem essa opção
-          attempt--;
-          continue;
-        }
-        lastErr = `${model}: HTTP 400 ${t.slice(0, 160)}`;
-        break;
+      if (res.status === 400 && variant < THINKING.length - 1) {
+        lastErr = `${model}: HTTP 400 ${(await res.text()).replace(/\s+/g, " ").slice(0, 120)}`;
+        variant++; // modelo não aceita essa opção de raciocínio: tenta a próxima
+        attempt--;
+        continue;
       }
       if (!res.ok) {
-        lastErr = `${model}: HTTP ${res.status} ${(await res.text()).slice(0, 160)}`;
+        lastErr = `${model}: HTTP ${res.status} ${(await res.text()).replace(/\s+/g, " ").slice(0, 160)}`;
         break;
       }
       const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
@@ -189,7 +187,35 @@ export async function classifyBatch(
   throw new Error(`Gemini indisponível (${[...errs, lastErr].filter(Boolean).join("; ")})`);
 }
 
-export function geminiModels(): string[] {
+const FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"];
+
+/** Ordem de preferência: os "lite" (rápidos, cota grátis maior), depois os flash normais; estáveis antes de preview. */
+export function rankModels(names: string[]): string[] {
+  const usable = names
+    .map((n) => n.replace(/^models\//, ""))
+    .filter((n) => /flash/.test(n) && !/(image|tts|audio|live|embed|vision|thinking|exp)/.test(n));
+  const score = (n: string) =>
+    (/lite/.test(n) ? 0 : 10) + (/-latest$/.test(n) ? 0 : 1) + (/preview/.test(n) ? 5 : 0) - (Number(n.match(/(\d+(?:\.\d+)?)/)?.[1] ?? 0) / 100);
+  return [...new Set(usable)].sort((a, b) => score(a) - score(b));
+}
+
+/** Pergunta ao Google quais modelos existem hoje (os nomes mudam a cada geração). */
+export async function geminiModels(apiKey?: string, doFetch: Fetch = fetch): Promise<string[]> {
   const env = (process.env.GEMINI_MODEL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return [...new Set([...env, "gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"])];
+  let found: string[] = [];
+  if (apiKey) {
+    try {
+      const res = await doFetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+        headers: { "x-goog-api-key": apiKey },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) {
+        const j = (await res.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
+        found = rankModels((j.models ?? []).filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => m.name));
+      }
+    } catch {
+      /* usa a lista padrão */
+    }
+  }
+  return [...new Set([...env, ...found.slice(0, 4), ...FALLBACK_MODELS])];
 }

@@ -160,10 +160,12 @@ async function runAi(client: Db) {
   let done = 0;
   let model = "";
   const errs: string[] = [];
+  const models = await geminiModels(key);
+  console.log("[ia] modelos:", models.join(", "));
   for (let i = 0; i < todo.length; i += size) {
     const batch = todo.slice(i, i + size);
     try {
-      const r = await classifyBatch(batch, key, geminiModels());
+      const r = await classifyBatch(batch, key, models);
       model = r.model;
       const byKey = new Map(batch.map((b) => [b.key, b.hash]));
       await db.saveInsights(client, r.insights.map((x) => ({ ...x, hash: byKey.get(x.key)!, model: r.model })));

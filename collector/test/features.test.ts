@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import sharp from "sharp";
-import { buildPrompt, classifyBatch, inputHash, parseInsights } from "../src/ai.js";
+import { buildPrompt, classifyBatch, inputHash, parseInsights, rankModels } from "../src/ai.js";
 import { computeAlerts, formatAlerts, isSurge, type RankRow } from "../src/alerts.js";
 import { buildSnapshots, mergeAds, resolveOfferKeys } from "../src/aggregate.js";
 import { toThumb } from "../src/creatives.js";
@@ -187,4 +187,25 @@ test("classifyBatch: tempo esgotado passa para o próximo modelo", async () => {
   const r = await classifyBatch([], "k", ["lento", "rapido"], fake, 10);
   assert.equal(r.model, "rapido");
   assert.equal(calls.filter((c) => c.includes("lento")).length, 2);
+});
+
+test("rankModels: lite primeiro, ignora imagem/tts e põe preview no fim", () => {
+  const r = rankModels([
+    "models/gemini-3.6-flash", "models/gemini-3.5-flash-lite", "models/gemini-3.6-flash-image",
+    "models/gemini-flash-latest", "models/gemini-flash-lite-latest", "models/gemini-3.8-flash-preview", "models/gemini-4-argon",
+  ]);
+  assert.deepEqual(r, ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-3.6-flash", "gemini-3.8-flash-preview"]);
+});
+
+test("classifyBatch: erro 400 troca a opção de raciocínio", async () => {
+  const bodies: string[] = [];
+  const fake = (async (_url: string, init: RequestInit) => {
+    bodies.push(String(init.body));
+    if (String(init.body).includes("thinkingLevel")) return new Response("{}", { status: 400 });
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "[]" }] } }] }), { status: 200 });
+  }) as typeof fetch;
+  const r = await classifyBatch([], "k", ["m"], fake, 10);
+  assert.equal(r.model, "m");
+  assert.equal(bodies.length, 2);
+  assert.ok(bodies[1].includes("thinkingBudget"));
 });
