@@ -46,7 +46,7 @@ export interface MetaAdSource {
 
 export interface GoogleAdSource {
   name: string;
-  countAdsForDomain(domain: string): Promise<number | null>;
+  countAdsForDomain(domain: string, region?: string): Promise<number | null>;
   close(): Promise<void>;
 }
 

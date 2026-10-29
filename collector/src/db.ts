@@ -150,16 +150,24 @@ export async function saveSnapshots(db: SupabaseClient, day: string, snaps: (Off
 }
 
 /** Domínios do dia que ainda não têm contagem do Google nos últimos 7 dias. */
-export async function domainsNeedingGoogle(db: SupabaseClient, day: string, limit: number): Promise<string[]> {
+export async function domainsNeedingGoogle(db: SupabaseClient, day: string, limit: number): Promise<{ domain: string; country: string }[]> {
   const snaps = check(
-    await db.from("offer_snapshots").select("domain, copies, cards").eq("day", day).not("domain", "is", null)
+    await db.from("offer_snapshots").select("domain, country, copies, cards").eq("day", day).not("domain", "is", null)
       .order("copies", { ascending: false }).limit(limit * 3),
     "snapshots",
-  ) as { domain: string }[];
+  ) as { domain: string; country: string | null }[];
   const since = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const recent = check(await db.from("google_counts").select("domain").gte("day", since), "google_counts") as { domain: string }[];
   const done = new Set(recent.map((r) => r.domain));
-  return [...new Set(snaps.map((s) => s.domain))].filter((d) => !done.has(d)).slice(0, limit);
+  const seen = new Set<string>();
+  const out: { domain: string; country: string }[] = [];
+  for (const s of snaps) {
+    if (done.has(s.domain) || seen.has(s.domain)) continue;
+    seen.add(s.domain);
+    out.push({ domain: s.domain, country: (s.country || "BR").toUpperCase() });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export async function saveGoogleCount(db: SupabaseClient, day: string, domain: string, ads: number) {

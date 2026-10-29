@@ -132,28 +132,36 @@ async function runMeta(client: ReturnType<typeof db.getDb>, day: string) {
 
 async function runGoogle(client: Db, day: string) {
   const domains = await db.domainsNeedingGoogle(client, day, num("GOOGLE_LIMIT", 40));
-  if (!domains.length) return;
+  if (!domains.length) {
+    notes.push("Google: nada novo para contar (todos os sites já contados nos últimos 7 dias)");
+    return;
+  }
   const source = new GoogleTransparencySource();
   let n = 0;
+  let misses = 0;
   try {
-    for (const d of domains) {
+    for (const { domain: d, country } of domains) {
       try {
-        const count = await source.countAdsForDomain(d);
-        console.log(`[google] ${d}: ${count ?? "não lido"}`);
+        const count = await source.countAdsForDomain(d, country);
+        console.log(`[google ${country}] ${d}: ${count ?? "não lido"}`);
         if (count !== null) {
           await db.saveGoogleCount(client, day, d, count);
           n++;
-        }
+          misses = 0;
+        } else misses++;
       } catch (e) {
+        misses++;
         console.warn(`[google] falhou ${d}:`, (e as Error).message);
       }
+      // 6 seguidos sem conseguir ler: o Google provavelmente está segurando o robô; tenta na próxima coleta
+      if (misses >= 6 && n === 0) break;
       await jitter(1500, 3500);
     }
   } finally {
     await source.close();
   }
-  await db.logRun(client, "google", true, n);
-  notes.push(`Google: ${n}/${domains.length} domínios contados`);
+  await db.logRun(client, "google", n > 0, n, n === 0 ? "O Google não mostrou a contagem (bloqueio temporário ou página mudou)" : "");
+  notes.push(`Google: ${n}/${domains.length} domínios contados${n === 0 ? " — o Google não mostrou a contagem nesta coleta; tenta de novo na próxima" : ""}`);
 }
 
 async function runRa(client: ReturnType<typeof db.getDb>, day: string) {
@@ -364,8 +372,12 @@ async function main() {
   // Anotações do GitHub Actions: aparecem no resumo da execução e podem ser lidas pela API
   if (process.env.GITHUB_ACTIONS) {
     const escA = (s: string) => s.replace(/%/g, "%25").replace(/\r/g, "").replace(/\n/g, "%0A");
-    for (const n of notes) console.log(`::notice title=Resumo::${escA(n)}`);
-    for (const f of failures) console.log(`::error title=Falha::${escA(f.slice(0, 1500))}`);
+    // o GitHub mostra no máximo 10 avisos por etapa: o resumo vai num só (uma linha por etapa)
+    console.log(`::notice title=Resumo::${escA(notes.join("\n"))}`);
+    for (const f of failures.slice(0, 9)) console.log(`::error title=Falha::${escA(f.slice(0, 1500))}`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      await writeFile(process.env.GITHUB_STEP_SUMMARY, `## Resumo da coleta\n\n${notes.map((n) => `- ${n}`).join("\n")}\n${failures.length ? `\n## Falhas\n\n${failures.map((f) => `- ${f.split("\n")[0]}`).join("\n")}\n` : ""}`, { flag: "a" }).catch(() => {});
+    }
   }
 
   if (failures.length) {
