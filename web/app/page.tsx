@@ -40,12 +40,12 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
   const f = parseFilters(await searchParams);
   const client = db();
 
-  const kwQuery = client.from("keywords").select("term").eq("active", true).order("term");
+  const kwQuery = client.from("keywords").select("term, country").eq("active", true).order("term");
   const growQuery = client.from("offer_ranking").select("offer_key", { count: "exact", head: true }).gt("copies_growth", 0);
   const [{ offers, error, total }, withWeak, { data: kws }, { data: allRows }, { data: lastRun }, { count: growingAll }] = await Promise.all([
     queryOffers(client, f),
     countAll(client, f),
-    f.pais === "todos" ? kwQuery : kwQuery.eq("country", f.pais),
+    kwQuery,
     client.from("offer_ranking").select("keywords, niche, kind, dest_type, checkout, platform, country").eq("discarded", false).or(STRONG_SIGNAL).limit(5000),
     client.from("runs").select("source, ok, finished_at").eq("source", "meta").order("id", { ascending: false }).limit(1),
     f.pais === "todos" ? growQuery : growQuery.eq("country", f.pais),
@@ -64,7 +64,8 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
   // contagem por país (seletor) e facetas só do país escolhido
   const byCountry = new Map<string, number>();
   for (const r of everyRow) byCountry.set(r.country ?? "BR", (byCountry.get(r.country ?? "BR") ?? 0) + 1);
-  const countryOpts = [...new Set(["BR", ...byCountry.keys()])]
+  const allKws = (kws ?? []) as { term: string; country: string | null }[];
+  const countryOpts = [...new Set(["BR", ...byCountry.keys(), ...allKws.map((k) => (k.country || "BR").toUpperCase())])]
     .sort((a, b) => (a === "BR" ? -1 : b === "BR" ? 1 : (byCountry.get(b) ?? 0) - (byCountry.get(a) ?? 0)))
     .map((c) => ({ value: c, label: `${flag(c)} ${countryName(c)}`, count: byCountry.get(c) ?? 0 }));
   const rows = f.pais === "todos" ? everyRow : everyRow.filter((r) => (r.country ?? "BR") === f.pais);
@@ -74,8 +75,9 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
   const placeName = f.pais === "todos" ? "no mundo" : f.pais === "BR" ? "no Brasil" : `em ${countryName(f.pais)}`;
   const counts = new Map<string, number>();
   for (const r of rows) for (const k of r.keywords ?? []) counts.set(k, (counts.get(k) ?? 0) + 1);
-  const keywordChips = ((kws ?? []) as { term: string }[])
-    .map((k) => ({ term: k.term, count: counts.get(k.term) ?? 0 }))
+  const terms = [...new Set(allKws.filter((k) => f.pais === "todos" || (k.country || "BR").toUpperCase() === f.pais).map((k) => k.term))];
+  const keywordChips = terms
+    .map((term) => ({ term, count: counts.get(term) ?? 0 }))
     .filter((k) => k.count > 0 || k.term === f.kw) // palavra sem oferta não vira botão
     .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
   const facets = {
@@ -108,7 +110,7 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
             <>{"{"}</>,
             <>  <K>ofertas</K>: <N>{totalAll ?? 0}</N>,</>,
             <>  <K>crescendo_7d</K>: <N>{growingAll ?? 0}</N>,</>,
-            <>  <K>palavras_chave</K>: <N>{kws?.length ?? 0}</N>,</>,
+            <>  <K>palavras_chave</K>: <N>{terms.length}</N>,</>,
             run ? (
               <>  <K>ultima_coleta</K>: <S>{fmtRun(run.finished_at)}</S>,</>
             ) : (
