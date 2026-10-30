@@ -7,6 +7,7 @@ const TABS = [
   { href: "/", file: "ranking", ext: ".tsx" },
   { href: "/funil", file: "funil", ext: ".tsx" },
   { href: "/espionagem", file: "espionagem", ext: ".tsx" },
+  { href: "/tiktok", file: "tiktok", ext: ".tsx" },
   { href: "/reclame-aqui", file: "reclame-aqui", ext: ".tsx" },
   { href: "/palavras-chave", file: "palavras-chave", ext: ".tsx" },
   { href: "/status", file: "status", ext: ".log" },

@@ -26,6 +26,8 @@ const TOGGLES = [
   { key: "validadas", label: "validadas (30+ dias)" },
   { key: "esfriando", label: "esfriando" },
   { key: "espionadas", label: "👁 espionadas" },
+  { key: "tiktok", label: "roda TikTok Ads" },
+  { key: "kwai", label: "roda Kwai Ads" },
 ] as const;
 
 const PRICES = [50, 100, 200, 500];

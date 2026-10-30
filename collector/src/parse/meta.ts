@@ -111,6 +111,15 @@ export function isGenericDomain(domain: string | null): boolean {
 export const normalizeName = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
 
+/**
+ * Domínios com sufixo de dois níveis (loja.com.br, shop.co.uk, kirei.co.jp, store.com.au):
+ * a parte própria da loja é a terceira de trás para frente.
+ */
+export function hasSecondLevelSuffix(domain: string): boolean {
+  if (/\.(com|net|org|gov|edu|art|blog|tv|ind|eco|app|dev|log|tec|wiki)\.br$/.test(domain)) return true;
+  return /\.(co|com|net|org|gov|edu|ac|ne|or|go|gr|ltd|plc|me|nom|biz|info)\.[a-z]{2}$/.test(domain);
+}
+
 /** Chave que agrupa anúncios da mesma oferta: domínio próprio ou, sem ele, o anunciante. */
 export function offerKeyFor(ad: Pick<MetaAd, "domain" | "advertiser">): string {
   if (ad.domain && !isGenericDomain(ad.domain)) {
@@ -118,7 +127,7 @@ export function offerKeyFor(ad: Pick<MetaAd, "domain" | "advertiser">): string {
     if (platformOf(ad.domain)) return "d:" + ad.domain;
     // subdomínios de checkout/página continuam na mesma oferta: pilates.site.com -> site.com
     const parts = ad.domain.split(".");
-    const keep = /\.(com|net|org|gov|edu|art|blog|tv)\.br$/.test(ad.domain) ? 3 : 2;
+    const keep = hasSecondLevelSuffix(ad.domain) ? 3 : 2;
     return "d:" + parts.slice(-keep).join(".");
   }
   return "a:" + normalizeName(ad.advertiser);

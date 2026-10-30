@@ -11,7 +11,7 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 864e5).toISOString().sl
 /** Raio-X, IA e funil de exemplo para algumas ofertas. */
 const EXTRA: Record<string, Row> = {
   "d:constlivre.com.br": {
-    platform: "Shopify", checkout: "Yampi", price_min: 197, price_max: 497, installments: "12x de R$ 41,42", has_vsl: true, pixels: ["Meta", "TikTok", "GTM"],
+    platform: "Shopify", checkout: "Yampi", price_min: 197, price_max: 497, installments: "12x de R$ 41,42", has_vsl: true, pixels: ["Meta", "TikTok", "GTM", "Kwai"],
     niche: "Emagrecimento", kind: "nutra", audience: "adultos que querem perder barriga", promise: "Desinchar e perder barriga em 90 dias com rotina simples",
     mechanism: "Fibras e ativos que regulam o intestino", offer: "Compre 2 leve 3, frete grátis e garantia de 30 dias", risk: "medio", risk_reason: "promessa de emagrecimento com prazo",
     status: "testando", note: "Modelar o ângulo do desafio de 90 dias com influenciador.",
@@ -48,6 +48,7 @@ const OFFERS: Row[] = [
   ["d:benditacanfora.com.br", "Bendita Cânfora", ["Bendita Cânfora", "Cânfora Casa"], "benditacanfora.com.br", 4, 4, 2, "2026-09-29", ["compre 2 leve 3"], "🌿 Sua casa livre daquela sensação de mofo e umidade começa pelos pequenos cantinhos.", null, 74],
   ["us:d:glowpatch.com", "GlowPatch", ["GlowPatch", "Glow Patch US"], "glowpatch.com", 14, 41, 2, "2026-06-02", ["free shipping", "weight loss"], "The patch everyone is talking about. Buy 2 get 1 free + free shipping today only.", 25, 140],
   ["us:d:pawsafe.co", "PawSafe", ["PawSafe"], "pawsafe.co", 6, 12, 1, "2026-09-18", ["shop now"], "Your dog deserves joint relief. Vet-formulated chews, 30-day money back guarantee.", 12, 9],
+  ["gb:d:gymshark.com", "Gymshark", ["Gymshark"], "gymshark.com", 12, 30, 1, "2026-03-01", ["free uk delivery"], "New season drop. Free UK delivery over £50.", 22, 900],
   ["jp:d:kireilab.jp", "キレイラボ", ["キレイラボ"], "kireilab.jp", 9, 18, 1, "2026-04-11", ["初回限定"], "初回限定 980円！送料無料でお届けします。", 15, 30],
 ].map(([offer_key, advertiser, advertisers, domain, cards, copies, pages, oldest_start, keywords, sample_text, copies_7d, google_ads]) => {
   const c = copies as number, c7 = copies_7d as number | null;
@@ -118,10 +119,26 @@ const KITS: Row[] = [{
 
 const TRANSCRIPTS: Row[] = [{ library_id: "1001", hook: "\"Pare de cortar o pão\" — mulher na cozinha segurando o pote", structure: "gancho → problema → autoridade → demonstração → oferta compre 2 leve 3 → chamada", cta: "Clique em saiba mais e garanta o kit", transcript: "Pare de cortar o pão. O problema não é o pão…" }];
 
+const TT_TOP: Row[] = [
+  ["7689472689073586196", "BR", "Transforme sua rotina com um caldo de ossos feito de verdade. Conheça!", "", "Alimentos e bebidas", "conversões", 1240, 0.67, 29],
+  ["7694006725578850325", "BR", "30 brincadeiras sem tela para imprimir e curtir em família. Conheça o kit por R$17,90!", "", "Educação", "conversões", 870, 0.74, 21],
+  ["7690988055779901448", "BR", "HM Smart Barra Funda: estrutura concluída, fase de instalações", "HM Engenharia", "Imóveis", "visualizações", 31, 0.84, 34],
+  ["7686820729639895061", "US", "Score every point! New grip socks, buy 2 get 1 free.", "GripPro", "Esportes", "tráfego", 5320, 0.93, 18],
+].map(([id, country, ad_title, brand_name, industry, objective, likes, ctr, duration], i) => ({
+  id, country, ad_title, brand_name, industry, objective, likes, ctr, duration, cover_url: null, video_url: null, thumb_path: null,
+  media_path: i === 0 ? "tt/7689472689073586196.mp4" : null, best_rank: i + 1, first_seen: new Date(Date.now() - (i === 1 ? 3600e3 : 5 * 864e5)).toISOString(), last_seen: new Date().toISOString(),
+}));
+
+const TT_LIB: Row[] = [
+  { id: "1880333310201858", watch_id: 4, country: "GB", advertiser: "GYMSHARK LTD", title: "New season, new PRs #gymshark", first_shown: daysAgo(29), last_shown: daysAgo(1), audience: "1K-10K", cover_url: null, thumb_path: null },
+  { id: "1880333310201859", watch_id: 4, country: "GB", advertiser: "GYMSHARK LTD", title: "Legging restock", first_shown: daysAgo(6), last_shown: daysAgo(1), audience: "0-1K", cover_url: null, thumb_path: null },
+];
+
 const WATCH: Row[] = [
   { id: 1, offer_key: "d:constlivre.com.br", label: "ConstLivre", term: "constlivre.com.br", country: "BR", created_at: new Date().toISOString() },
   { id: 2, offer_key: "us:d:glowpatch.com", label: "GlowPatch", term: "glowpatch.com", country: "US", created_at: new Date().toISOString() },
   { id: 3, offer_key: null, label: "concorrente.com.br", term: "concorrente.com.br", country: "BR", created_at: new Date().toISOString() },
+  { id: 4, offer_key: "gb:d:gymshark.com", label: "Gymshark", term: "gymshark.com", country: "GB", created_at: new Date().toISOString() },
 ];
 
 const IGNORED: Row[] = ["Shopee", "Mercado Livre", "AliExpress", "InfinitePay", "O Boticário", "Natura", "Amazon.com.br", "SHEIN Brasil"].map((name) => ({ name }));
@@ -152,6 +169,7 @@ const TABLES: Record<string, Row[]> = {
   ignored_advertisers: IGNORED, ra_new_companies: RA, runs: RUNS,
   landing_pages: LANDINGS, offer_aliases: [], offer_insights: [], alerts_sent: [],
   offer_kits: KITS, ad_transcripts: TRANSCRIPTS, watchlist: WATCH,
+  tiktok_top_ads: TT_TOP, tiktok_library_ads: TT_LIB, tiktok_watch_counts: [{ watch_id: 4, day: today, total: 2179 }],
   offer_notes: OFFERS.filter((o) => o.status).map((o) => ({ offer_key: o.offer_key, status: o.status, note: o.note, updated_at: today })),
 };
 

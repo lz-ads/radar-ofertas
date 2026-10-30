@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   countryName, countryOfKey, creativeSrc, daysLabel, db, DEST_LABEL, flag, fmtDate, keyLabel, KIND_LABEL, libraryLink, priceRange, shortUrl,
-  storageUrl, STATUSES, STATUS_LABEL, type OfferRow,
+  storageUrl, STATUSES, STATUS_LABEL, TIKTOK_LIB, type OfferRow,
 } from "@/lib/db";
 import type { KitStructure, MyInput } from "@/lib/kit";
 import { saveNote, setStatus, toggleWatch } from "../../actions";
@@ -105,6 +105,17 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
   const dl = new Map(downloads.map((d) => [d.id, d]));
   const shot = page?.shot_path ? storageUrl("paginas", page.shot_path) : null;
   const st = kit?.structure ?? null;
+  // espionagem no TikTok (biblioteca europeia): anúncios do concorrente espionado
+  const { data: watchRows } = await client.from("watchlist").select("id, term, label").eq("offer_key", key).limit(1);
+  const watchRow = (watchRows?.[0] as { id: number; term: string; label: string } | undefined) ?? null;
+  const [{ data: ttAds }, { data: ttCount }] = watchRow
+    ? await Promise.all([
+        client.from("tiktok_library_ads").select("id, advertiser, title, first_shown, last_shown, audience, cover_url, thumb_path").eq("watch_id", watchRow.id).order("last_shown", { ascending: false }).limit(24),
+        client.from("tiktok_watch_counts").select("day, total").eq("watch_id", watchRow.id).order("day", { ascending: false }).limit(1),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const tiktokAds = (ttAds ?? []) as { id: string; advertiser: string; title: string | null; first_shown: string | null; last_shown: string | null; audience: string | null; cover_url: string | null; thumb_path: string | null }[];
+  const tiktokTotal = (ttCount?.[0] as { total: number } | undefined)?.total ?? null;
 
   return (
     <>
@@ -348,6 +359,31 @@ export default async function Oferta({ params }: { params: Promise<{ key: string
             })}
           </div>
         </>
+      )}
+
+      {TIKTOK_LIB.has(country) && watchRow && (
+        <section className="panel" style={{ marginBottom: 32 }}>
+          <div className="section-head">
+            <h2>TikTok <span className="dim mono" style={{ fontSize: 13 }}>// biblioteca europeia · últimos 30 dias{tiktokTotal !== null ? ` · ${tiktokTotal.toLocaleString("pt-BR")} anúncios` : ""}</span></h2>
+            <a className="ext-link" href={`https://library.tiktok.com/ads?region=${country}&adv_name=${encodeURIComponent(watchRow.term.includes(".") && !watchRow.term.includes(" ") ? watchRow.term.split(".")[0] : watchRow.label)}&query_type=1`} target="_blank" rel="noreferrer">abrir na biblioteca ↗</a>
+          </div>
+          {tiktokAds.length ? (
+            <div className="tt-spy">
+              {tiktokAds.map((t) => (
+                <figure key={t.id} style={{ margin: 0 }}>
+                  <Thumb src={t.thumb_path ? storageUrl("criativos", t.thumb_path) : t.cover_url} alt={`Anúncio no TikTok de ${t.advertiser}`} video />
+                  <figcaption>
+                    <b>{t.advertiser}</b> · {fmtDate(t.first_shown)} → {fmtDate(t.last_shown)}
+                    {t.audience && <> · {t.audience} pessoas</>}
+                    {t.title && <div className="dim">{t.title.slice(0, 90)}</div>}
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          ) : (
+            <p className="muted" style={{ margin: 0 }}>A busca no TikTok entra na próxima coleta.</p>
+          )}
+        </section>
       )}
 
       <h2>Anúncios coletados <span className="dim mono" style={{ fontSize: 14 }}>[{list.length}]</span></h2>

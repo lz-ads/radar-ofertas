@@ -170,12 +170,14 @@ export default async function Ranking({ searchParams }: { searchParams: Search }
                       {f.pais === "todos" && <span className="flag" title={countryName(o.country)}>{flag(o.country)}</span>}
                       <Link className="offer-name" href={`/oferta/${encodeURIComponent(o.offer_key)}`}>{o.advertiser}</Link>
                       {o.domain && <span className="domain">{o.domain}</span>}
-                      {(meta.length > 0 || o.risk === "alto" || (o.status && o.status !== "favorita") || o.long_runners > 0 || o.cooling || o.watched || o.has_kit) && (
+                      {(meta.length > 0 || o.risk === "alto" || (o.status && o.status !== "favorita") || o.long_runners > 0 || o.cooling || o.watched || o.has_kit || o.pixels?.includes("TikTok") || o.pixels?.includes("Kwai")) && (
                         <div className="meta-line">
                           {meta.map((m) => <span key={m}>{m}</span>)}
                           {o.long_runners > 0 && <span className="badge ok" title={`${o.long_runners} anúncio(s) rodando há 30+ dias: sinal de oferta validada`}>✓ 30d+ ×{o.long_runners}</span>}
                           {o.cooling && <span className="badge cold" title="Cópias caindo forte contra 7 dias atrás">🧊 esfriando</span>}
                           {o.watched && <span className="badge" title="Na sua lista de espionagem">👁</span>}
+                          {o.pixels?.includes("TikTok") && <span className="badge tt" title="A página de vendas tem o pixel do TikTok: a oferta provavelmente roda TikTok Ads">TikTok</span>}
+                          {o.pixels?.includes("Kwai") && <span className="badge kw" title="A página de vendas tem o pixel do Kwai: a oferta provavelmente roda Kwai Ads">Kwai</span>}
                           {o.has_kit && <Link className="badge" href={`/oferta/${encodeURIComponent(o.offer_key)}#kit`} title="Kit de modelagem pronto">kit</Link>}
                           {o.risk === "alto" && <span className="risk" title={o.risk_reason ?? "Promessa arriscada para as políticas de anúncio"}>⚠ risco alto</span>}
                           {o.status && o.status !== "favorita" && <span className="pill">{o.status}</span>}

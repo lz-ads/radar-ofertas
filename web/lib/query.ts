@@ -28,6 +28,8 @@ export interface Filters {
   validadas: boolean;  // anúncios rodando há 30+ dias
   esfriando: boolean;  // cópias caindo forte na semana
   espionadas: boolean; // na lista de espionagem
+  tiktok: boolean;     // página com pixel do TikTok (roda TikTok Ads)
+  kwai: boolean;       // página com pixel do Kwai (roda Kwai Ads)
   limit: number;
 }
 
@@ -95,6 +97,8 @@ export function parseFilters(sp: Raw): Filters {
     validadas: one(sp.validadas) === "1",
     esfriando: one(sp.esfriando) === "1",
     espionadas: one(sp.espionadas) === "1",
+    tiktok: one(sp.tiktok) === "1",
+    kwai: one(sp.kwai) === "1",
     limit: Number.isFinite(n) && n > 0 ? Math.min(Math.round(n), MAX) : PAGE_SIZE,
   };
 }
@@ -108,7 +112,7 @@ export function hrefWith(f: Filters, patch: Partial<Filters>, path = "/"): strin
   if (m.sort !== "score") p.set("ordem", m.sort);
   const defaultDir = ASC_DEFAULT.includes(m.sort) ? "asc" : "desc";
   if (m.dir !== defaultDir) p.set("dir", m.dir);
-  for (const k of ["novas", "crescendo", "google", "site", "todas", "cod", "vsl", "validadas", "esfriando", "espionadas"] as const) if (m[k]) p.set(k, "1");
+  for (const k of ["novas", "crescendo", "google", "site", "todas", "cod", "vsl", "validadas", "esfriando", "espionadas", "tiktok", "kwai"] as const) if (m[k]) p.set(k, "1");
   if (m.pais && m.pais !== "BR") p.set("pais", m.pais);
   for (const k of ["nicho", "tipo", "destino", "checkout", "risco", "status"] as const) if (m[k]) p.set(k, m[k]);
   if (m.preco) p.set("preco", String(m.preco));
@@ -118,7 +122,7 @@ export function hrefWith(f: Filters, patch: Partial<Filters>, path = "/"): strin
 }
 
 export function isFiltered(f: Filters) {
-  return !!(f.q || f.kw || f.novas || f.crescendo || f.google || f.site || f.nicho || f.tipo || f.destino || f.checkout || f.preco || f.risco || f.cod || f.vsl || f.status || f.validadas || f.esfriando || f.espionadas);
+  return !!(f.q || f.kw || f.novas || f.crescendo || f.google || f.site || f.nicho || f.tipo || f.destino || f.checkout || f.preco || f.risco || f.cod || f.vsl || f.status || f.validadas || f.esfriando || f.espionadas || f.tiktok || f.kwai);
 }
 
 /** Consulta do ranking com os filtros aplicados. Devolve também o total (para "mostrar mais"). */
@@ -149,6 +153,8 @@ export async function queryOffers(client: SupabaseClient, f: Filters, limit = f.
   if (f.validadas) query = query.gt("long_runners", 0);
   if (f.esfriando) query = query.eq("cooling", true);
   if (f.espionadas) query = query.eq("watched", true);
+  if (f.tiktok) query = query.contains("pixels", ["TikTok"]);
+  if (f.kwai) query = query.contains("pixels", ["Kwai"]);
   // funil: descartadas ficam fora do ranking, a não ser que peça
   if (f.status === "funil") query = query.not("status", "is", null).eq("discarded", false);
   else if (f.status && f.status !== "todos") query = query.eq("status", f.status);

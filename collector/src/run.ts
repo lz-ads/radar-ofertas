@@ -2,8 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { buildKit, classifyBatch, geminiModels, inputHash, kitHash, transcribeVideo } from "./ai.js";
 import { computeAlerts, formatAlerts, formatCooling, formatWatch, formatWelcome } from "./alerts.js";
 import { applyCountry, buildSnapshots, mergeAds, resolveOfferKeys, type AdWithMeta, type OfferAlias } from "./aggregate.js";
-import { storeCreatives } from "./creatives.js";
-import { MEDIA_BUCKET, pruneMedia, storeMedia } from "./media.js";
+import { BUCKET, storeCreatives, toThumb } from "./creatives.js";
+import { MAX_FILE, MEDIA_BUCKET, pruneMedia, storeMedia } from "./media.js";
+import { libraryTerm, TIKTOK_LIBRARY_COUNTRIES, TikTokSource } from "./sources/tiktok.js";
 import * as db from "./db.js";
 import { closeBrowser, jitter } from "./sources/browser.js";
 import { GoogleTransparencySource } from "./sources/googleBrowser.js";
@@ -296,6 +297,117 @@ async function runKits(client: Db) {
   notes.push(`Kit de modelagem: ${done}/${todo.length} mapas de página${errs.length ? ` (falha: ${errs[0].slice(0, 160)})` : ""}`);
 }
 
+const TIKTOK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
+
+/** Baixa um arquivo do TikTok (pede o "Referer" da página, senão o CDN recusa). */
+async function tiktokFetch(url: string, referer: string): Promise<Buffer> {
+  const res = await fetch(url, { headers: { "User-Agent": TIKTOK_UA, Referer: referer }, signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const len = Number(res.headers.get("content-length") || 0);
+  if (len > MAX_FILE) throw new Error("arquivo grande demais");
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > MAX_FILE) throw new Error("arquivo grande demais");
+  if (buf.length < 1000) throw new Error("arquivo vazio");
+  return buf;
+}
+
+/**
+ * TikTok: anúncios em destaque da Central de Criativos (Brasil e EUA por padrão) e
+ * espionagem na biblioteca europeia (concorrentes espionados em Portugal, Reino Unido e Europa).
+ */
+async function runTikTok(client: Db, day: string) {
+  const countries = (process.env.TIKTOK_COUNTRIES || "BR,US").split(",").map((c) => c.trim().toUpperCase()).filter(Boolean);
+  const source = new TikTokSource();
+  const per: string[] = [];
+  const errors: string[] = [];
+  let found = 0;
+  let spied = 0;
+  let spyAds = 0;
+  try {
+    for (const c of countries) {
+      try {
+        const r = await source.topAds(c, num("TIKTOK_PAGES", 6));
+        await db.saveTopAds(client, r.ads, source.industries);
+        found += r.ads.length;
+        per.push(`${c} ${r.ads.length}${r.total ? `/${r.total}` : ""}`);
+      } catch (e) {
+        errors.push(`${c}: ${(e as Error).message.split("\n")[0]}`);
+      }
+      await jitter(2000, 4000);
+    }
+
+    // espionagem: só onde existe a biblioteca pública (Europa e Reino Unido)
+    const watch = await db.watchForTiktok(client, TIKTOK_LIBRARY_COUNTRIES);
+    for (const w of watch) {
+      try {
+        const term = libraryTerm(w.term, w.label);
+        const r = await source.library(term, w.country);
+        await db.saveLibraryAds(client, w.id, w.country, day, r.total, r.ads);
+        spied++;
+        spyAds += r.ads.length;
+      } catch (e) {
+        errors.push(`espionagem ${w.label}: ${(e as Error).message.split("\n")[0]}`);
+      }
+      await jitter(2000, 4000);
+    }
+  } finally {
+    await source.close();
+  }
+
+  // capas (miniaturas) e vídeos dos mais curtidos
+  const todo = await db.tiktokMediaTodo(client, num("TIKTOK_VIDEOS", 20));
+  let covers = 0, videos = 0;
+  for (const it of todo.covers) {
+    try {
+      const webp = await toThumb(await tiktokFetch(it.cover_url, "https://ads.tiktok.com/"));
+      const path = `tt/${it.id}.webp`;
+      const up = await client.storage.from(BUCKET).upload(path, webp, { contentType: "image/webp", upsert: true, cacheControl: "31536000" });
+      if (!up.error) {
+        await client.from("tiktok_top_ads").update({ thumb_path: path }).eq("id", it.id);
+        covers++;
+      }
+    } catch {
+      /* capa indisponível: tenta na próxima */
+    }
+  }
+  for (const it of todo.videos) {
+    try {
+      const buf = await tiktokFetch(it.video_url, "https://ads.tiktok.com/");
+      const path = `tt/${it.id}.mp4`;
+      const up = await client.storage.from(MEDIA_BUCKET).upload(path, buf, { contentType: "video/mp4", upsert: true, cacheControl: "31536000" });
+      if (!up.error) {
+        await client.from("tiktok_top_ads").update({ media_path: path, media_bytes: buf.length }).eq("id", it.id);
+        videos++;
+      }
+    } catch {
+      /* vídeo indisponível: tenta na próxima */
+    }
+  }
+  for (const it of await db.libraryCoversTodo(client, 120)) {
+    try {
+      const webp = await toThumb(await tiktokFetch(it.cover_url, "https://library.tiktok.com/"));
+      const path = `ttl/${it.id}.webp`;
+      const up = await client.storage.from(BUCKET).upload(path, webp, { contentType: "image/webp", upsert: true, cacheControl: "31536000" });
+      if (!up.error) await client.from("tiktok_library_ads").update({ thumb_path: path }).eq("id", it.id);
+    } catch {
+      /* segue */
+    }
+  }
+  const stale = await db.staleTiktokMedia(client);
+  if (stale.length) {
+    await client.storage.from(MEDIA_BUCKET).remove(stale.map((s) => s.media_path));
+    await client.from("tiktok_top_ads").update({ media_path: null, media_bytes: null }).in("id", stale.map((s) => s.id));
+  }
+
+  const ok = found > 0 || spied > 0;
+  await db.logRun(client, "tiktok", ok, found + spyAds, [per.join(", "), ...errors].filter(Boolean).join("\n"));
+  notes.push(
+    `TikTok: ${found} anúncios em destaque (${per.join(", ") || "nenhum país"}), ${covers} capas e ${videos} vídeos guardados; ` +
+      `espionagem ${spied} concorrente(s), ${spyAds} anúncios${errors.length ? `. Falhas: ${errors.slice(0, 3).join(" | ")}` : ""}`,
+  );
+  if (!ok && countries.length) throw new Error(`TikTok: nada lido (${errors[0] ?? "a página não respondeu"})`);
+}
+
 /** Guarda o arquivo original (vídeo/imagem) dos melhores anúncios para baixar em 1 clique. */
 async function runMedia(client: Db) {
   const keys = await db.priorityKeys(client, num("MEDIA_OFFERS", 40));
@@ -325,6 +437,11 @@ async function runAlerts(client: Db) {
   if (watch.news.length) await sendTelegram(formatWatch(watch.news));
   await db.markAlerts(client, watch.toMark.map((key) => ({ key, kind: "watch" })));
 
+  // espionagem no TikTok (biblioteca europeia)
+  const tt = await db.tiktokWatchNews(client, sent);
+  if (tt.news.length) await sendTelegram(formatWatch(tt.news));
+  await db.markAlerts(client, tt.toMark.map((key) => ({ key, kind: "tiktok" })));
+
   // funil: oferta que você está modelando/testando perdendo força (1 aviso por semana)
   const WEEK = 7 * 864e5;
   const cooling = (await db.coolingInFunnel(client)).filter((r) => {
@@ -334,7 +451,7 @@ async function runAlerts(client: Db) {
   if (cooling.length) await sendTelegram(formatCooling(cooling));
   await db.markAlerts(client, cooling.map((r) => ({ key: r.offer_key, kind: "esfriando" })));
 
-  notes.push(`Alertas: ${firstRun ? "primeira mensagem enviada" : `${toSend.length} enviados`}, espionagem ${watch.news.length}, esfriando ${cooling.length}`);
+  notes.push(`Alertas: ${firstRun ? "primeira mensagem enviada" : `${toSend.length} enviados`}, espionagem ${watch.news.length + tt.news.length}, esfriando ${cooling.length}`);
 }
 
 async function main() {
@@ -359,6 +476,7 @@ async function main() {
     if (want("criativos")) await step("criativos", () => runCreatives(client));
     if (want("midia")) await step("midia", () => runMedia(client));
     if (want("google")) await step("google", () => runGoogle(client, day));
+    if (want("tiktok")) await step("tiktok", () => runTikTok(client, day));
     if (want("ra")) await step("reclameaqui", () => runRa(client, day));
     if (want("paginas")) await step("paginas", () => runLandings(client));
     if (want("ia")) await step("ia", () => runAi(client));

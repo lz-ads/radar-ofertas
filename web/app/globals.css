@@ -522,3 +522,20 @@ a.status-btn { display: inline-block; }
   .kit-cols { grid-template-columns: 1fr; }
   .inline-form { flex-wrap: wrap; }
 }
+
+/* ---------- TikTok ---------- */
+.badge.tt { color: #ff5c8a; border-color: rgba(255,92,138,.45); }
+.badge.kw { color: #ffa94d; border-color: rgba(255,169,77,.45); }
+.tt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin-top: 20px; }
+.tt-card { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
+.tt-card:hover { border-color: var(--rule-strong); }
+.tt-media { position: relative; }
+.tt-media .thumb { width: 100%; height: auto; aspect-ratio: 9 / 13; border: 0; border-radius: 0; }
+.tt-new { position: absolute; right: 6px; top: 6px; font-size: 11px; color: var(--void); background: #7ee2b8; border-radius: 3px; padding: 1px 5px; }
+.tt-body { padding: 12px 14px 14px; display: grid; gap: 6px; }
+.tt-brand { font-size: 14px; color: var(--frost); }
+.tt-title { margin: 0; font-size: 13.5px; color: #c9d5f0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.linkish.on { color: var(--frost); text-decoration: underline; }
+.tt-spy { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.tt-spy .thumb { width: 100%; height: auto; aspect-ratio: 9 / 14; }
+.tt-spy figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; }

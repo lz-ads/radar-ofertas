@@ -571,3 +571,112 @@ export async function coolingInFunnel(db: SupabaseClient) {
     .eq("cooling", true).not("status", "is", null).eq("discarded", false).limit(50);
   return res.error ? [] : ((res.data ?? []) as import("./alerts.js").CoolingRow[]);
 }
+
+/* ---------------- TikTok ---------------- */
+
+export async function saveTopAds(db: SupabaseClient, ads: import("./sources/tiktok.js").TopAd[], industries: Map<string, string>) {
+  if (!ads.length) return;
+  const ids = ads.map((a) => a.id);
+  const prev = new Map<string, number | null>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const res = await db.from("tiktok_top_ads").select("id, best_rank").in("id", ids.slice(i, i + 200));
+    for (const r of (res.data ?? []) as { id: string; best_rank: number | null }[]) prev.set(r.id, r.best_rank);
+  }
+  const now = new Date().toISOString();
+  check(
+    await db.from("tiktok_top_ads").upsert(
+      ads.map((a) => ({
+        id: a.id, country: a.country, ad_title: a.adTitle, brand_name: a.brandName, industry_key: a.industryKey,
+        ...(a.industryKey && industries.get(a.industryKey) ? { industry: industries.get(a.industryKey) } : {}),
+        objective: a.objective, likes: a.likes, ctr: a.ctr, duration: a.duration, cover_url: a.coverUrl, video_url: a.videoUrl,
+        best_rank: Math.min(a.rank, prev.get(a.id) ?? Infinity), last_seen: now,
+      })),
+      { onConflict: "id" },
+    ),
+    "tiktok_top_ads",
+  );
+}
+
+/** Capas e vídeos do TikTok ainda não guardados (os vídeos só dos mais curtidos). */
+export async function tiktokMediaTodo(db: SupabaseClient, videoLimit: number) {
+  const since = new Date(Date.now() - 2 * 864e5).toISOString();
+  const [covers, videos] = await Promise.all([
+    db.from("tiktok_top_ads").select("id, cover_url").is("thumb_path", null).not("cover_url", "is", null).gte("last_seen", since).limit(300),
+    db.from("tiktok_top_ads").select("id, video_url").is("media_path", null).not("video_url", "is", null).gte("last_seen", since)
+      .order("likes", { ascending: false }).limit(videoLimit),
+  ]);
+  return {
+    covers: (covers.data ?? []) as { id: string; cover_url: string }[],
+    videos: (videos.data ?? []) as { id: string; video_url: string }[],
+  };
+}
+
+/** Vídeos do TikTok que saíram do destaque há mais de 21 dias: apaga do Storage para caber no plano grátis. */
+export async function staleTiktokMedia(db: SupabaseClient) {
+  const before = new Date(Date.now() - 21 * 864e5).toISOString();
+  const res = await db.from("tiktok_top_ads").select("id, media_path").not("media_path", "is", null).lt("last_seen", before).limit(500);
+  return (res.data ?? []) as { id: string; media_path: string }[];
+}
+
+export async function watchForTiktok(db: SupabaseClient, countries: Set<string>) {
+  const res = await db.from("watchlist").select("id, term, label, country, offer_key");
+  if (res.error) return [];
+  return ((res.data ?? []) as { id: number; term: string; label: string; country: string; offer_key: string | null }[])
+    .filter((w) => countries.has((w.country || "BR").toUpperCase()));
+}
+
+export async function saveLibraryAds(
+  db: SupabaseClient,
+  watchId: number,
+  country: string,
+  day: string,
+  total: number | null,
+  ads: import("./sources/tiktok.js").LibraryAd[],
+) {
+  const now = new Date().toISOString();
+  if (ads.length) {
+    check(
+      await db.from("tiktok_library_ads").upsert(
+        ads.map((a) => ({
+          id: a.id, watch_id: watchId, country, advertiser: a.advertiser, title: a.title, first_shown: a.firstShown,
+          last_shown: a.lastShown, audience: a.audience, cover_url: a.coverUrl, video_url: a.videoUrl, last_seen: now,
+        })),
+        { onConflict: "id" },
+      ),
+      "tiktok_library_ads",
+    );
+  }
+  if (total !== null) {
+    check(await db.from("tiktok_watch_counts").upsert({ watch_id: watchId, day, total }, { onConflict: "watch_id,day" }), "tiktok_watch_counts");
+  }
+}
+
+export async function libraryCoversTodo(db: SupabaseClient, limit: number) {
+  const since = new Date(Date.now() - 2 * 864e5).toISOString();
+  const res = await db.from("tiktok_library_ads").select("id, cover_url").is("thumb_path", null).not("cover_url", "is", null).gte("last_seen", since).limit(limit);
+  return (res.data ?? []) as { id: string; cover_url: string }[];
+}
+
+/** Anúncios novos no TikTok de cada concorrente espionado desde o último aviso. */
+export async function tiktokWatchNews(db: SupabaseClient, sent: Map<string, number>) {
+  const res = await db.from("watchlist").select("id, offer_key, label, term, country");
+  if (res.error) return { news: [] as import("./alerts.js").WatchNews[], toMark: [] as string[] };
+  const news: import("./alerts.js").WatchNews[] = [];
+  const toMark: string[] = [];
+  for (const w of (res.data ?? []) as { id: number; offer_key: string | null; label: string }[]) {
+    const key = `watch:${w.id}`;
+    const has = await db.from("tiktok_library_ads").select("id", { count: "exact", head: true }).eq("watch_id", w.id);
+    if (!has.count) continue;
+    const since = sent.get(`${key}|tiktok`);
+    if (since === undefined) {
+      toMark.push(key); // primeira vez: só marca o ponto de partida
+      continue;
+    }
+    const c = await db.from("tiktok_library_ads").select("id", { count: "exact", head: true }).eq("watch_id", w.id).gt("first_seen", new Date(since).toISOString());
+    if ((c.count ?? 0) > 0) {
+      news.push({ key: w.offer_key ?? key, label: `${w.label} (TikTok)`, newAds: c.count ?? 0 });
+      toMark.push(key);
+    }
+  }
+  return { news, toMark };
+}

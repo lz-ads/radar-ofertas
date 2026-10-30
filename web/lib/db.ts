@@ -153,3 +153,9 @@ export const libraryLink = (q: string, country = "BR") =>
 
 /** "há 45 dias" */
 export const daysLabel = (d: number | null | undefined) => (d === null || d === undefined ? "—" : d <= 0 ? "hoje" : d === 1 ? "1 dia" : `${d} dias`);
+
+/** Países com biblioteca pública de anúncios do TikTok (lei europeia). */
+export const TIKTOK_LIB = new Set([
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IS", "IE", "IT", "LV", "LI", "LT", "LU", "MT",
+  "NL", "NO", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "CH", "TR", "GB",
+]);
