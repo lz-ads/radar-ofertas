@@ -376,3 +376,29 @@ export async function geminiModels(apiKey?: string, doFetch: Fetch = fetch): Pro
   }
   return [...new Set([...env, ...found.slice(0, 4), ...FALLBACK_MODELS])];
 }
+
+/* ---------------- Nicho de anúncios do TikTok (o TikTok só dá um código de setor) ---------------- */
+
+const NICHE_SCHEMA = {
+  type: "ARRAY",
+  items: { type: "OBJECT", properties: { id: { type: "STRING" }, nicho: { type: "STRING", enum: [...NICHES] } }, required: ["id", "nicho"] },
+};
+
+/** Classifica o nicho de vários anúncios pelo texto (um pedido para até ~40 anúncios). */
+export async function classifyNiches(items: { id: string; text: string }[], apiKey: string, models: string[], doFetch: Fetch = fetch) {
+  if (!items.length) return new Map<string, string>();
+  const prompt = [
+    "Classifique o nicho de cada anúncio pelo texto. Use exatamente um destes nichos:",
+    NICHES.join(" | "),
+    "Devolva um item por id.",
+    "",
+    JSON.stringify(items.map((i) => ({ id: i.id, texto: i.text.slice(0, 300) }))),
+  ].join("\n");
+  const r = await geminiJson({ apiKey, models, doFetch, schema: NICHE_SCHEMA, parts: [{ text: prompt }], timeoutMs: 60_000 });
+  const out = new Map<string, string>();
+  const ids = new Set(items.map((i) => i.id));
+  for (const x of parseJson<{ id: string; nicho: string }[]>(r.text) ?? []) {
+    if (ids.has(String(x.id)) && (NICHES as readonly string[]).includes(x.nicho)) out.set(String(x.id), x.nicho);
+  }
+  return out;
+}

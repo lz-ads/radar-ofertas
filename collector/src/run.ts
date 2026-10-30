@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { buildKit, classifyBatch, geminiModels, inputHash, kitHash, transcribeVideo } from "./ai.js";
+import { buildKit, classifyBatch, classifyNiches, geminiModels, inputHash, kitHash, transcribeVideo } from "./ai.js";
 import { computeAlerts, formatAlerts, formatCooling, formatWatch, formatWelcome } from "./alerts.js";
 import { applyCountry, buildSnapshots, mergeAds, resolveOfferKeys, type AdWithMeta, type OfferAlias } from "./aggregate.js";
 import { BUCKET, storeCreatives, toThumb } from "./creatives.js";
@@ -393,6 +393,25 @@ async function runTikTok(client: Db, day: string) {
       /* segue */
     }
   }
+  // o TikTok só manda um código de setor: a IA dá o nicho pelo texto (mesmos nichos do ranking)
+  let niched = 0;
+  const key = process.env.GEMINI_API_KEY;
+  if (key) {
+    const { data: pending } = await client.from("tiktok_top_ads").select("id, ad_title").is("industry", null).not("ad_title", "is", null).limit(160);
+    const list = ((pending ?? []) as { id: string; ad_title: string }[]).filter((p) => p.ad_title.trim());
+    const models = await aiModels(key);
+    for (let i = 0; i < list.length; i += 40) {
+      try {
+        const m = await classifyNiches(list.slice(i, i + 40).map((p) => ({ id: p.id, text: p.ad_title })), key, models);
+        for (const [id, niche] of m) await client.from("tiktok_top_ads").update({ industry: niche }).eq("id", id);
+        niched += m.size;
+      } catch (e) {
+        errors.push(`nichos: ${(e as Error).message.slice(0, 120)}`);
+        break;
+      }
+    }
+  }
+
   const stale = await db.staleTiktokMedia(client);
   if (stale.length) {
     await client.storage.from(MEDIA_BUCKET).remove(stale.map((s) => s.media_path));
@@ -402,7 +421,7 @@ async function runTikTok(client: Db, day: string) {
   const ok = found > 0 || spied > 0;
   await db.logRun(client, "tiktok", ok, found + spyAds, [per.join(", "), ...errors].filter(Boolean).join("\n"));
   notes.push(
-    `TikTok: ${found} anúncios em destaque (${per.join(", ") || "nenhum país"}), ${covers} capas e ${videos} vídeos guardados; ` +
+    `TikTok: ${found} anúncios em destaque (${per.join(", ") || "nenhum país"}), ${covers} capas e ${videos} vídeos guardados, ${niched} nichos pela IA; ` +
       `espionagem ${spied} concorrente(s), ${spyAds} anúncios${errors.length ? `. Falhas: ${errors.slice(0, 3).join(" | ")}` : ""}`,
   );
   if (!ok && countries.length) throw new Error(`TikTok: nada lido (${errors[0] ?? "a página não respondeu"})`);
