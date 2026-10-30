@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Rodar só algumas etapas (meta, criativos, midia, google, ra, paginas, ia, kit, transcricao, alertas), separadas por vírgula. Vazio roda tudo."
+        description: "Rodar só algumas etapas (meta, criativos, midia, google, tiktok, ra, paginas, ia, kit, transcricao, alertas), separadas por vírgula. Vazio roda tudo."
         required: false
         default: ""
       paises:
