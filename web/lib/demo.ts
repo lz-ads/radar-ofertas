@@ -167,13 +167,35 @@ const LANDINGS: Row[] = [
 const SEARCHES: Row[] = [
   { id: 1, term: "pagamento na entrega", kind: "palavra", match: "exata", country: "BR", status: "pronta", total_results: "~2.300 resultados", ads_found: 5, offers_found: 3, google_ads: null, message: null, requested_at: minsAgo(6), started_at: minsAgo(5), finished_at: minsAgo(4) },
   { id: 2, term: "glowpatch.com", kind: "site", match: "exata", country: "US", status: "pronta", total_results: "~40 resultados", ads_found: 3, offers_found: 2, google_ads: 140, message: null, requested_at: minsAgo(60 * 5), started_at: minsAgo(60 * 5 - 1), finished_at: minsAgo(60 * 5 - 2) },
+  {
+    id: 4, term: "bet / cassino online", kind: "nicho", match: "exata", country: "BR", status: "pronta", total_results: null, ads_found: 7, offers_found: 4, google_ads: null,
+    message: 'Sem anúncios ativos: "jogo do tigrinho".', requested_at: minsAgo(30), started_at: minsAgo(29), finished_at: minsAgo(20),
+    terms: ["cassino online", "rodadas grátis", "bônus de boas-vindas", "saque via pix", "jogo do tigrinho"],
+    term_stats: [
+      { term: "cassino online", total: "~4.100 resultados", ads: 80 }, { term: "rodadas grátis", total: "~2.600 resultados", ads: 80 },
+      { term: "bônus de boas-vindas", total: "~1.900 resultados", ads: 74 }, { term: "saque via pix", total: "~730 resultados", ads: 61 },
+      { term: "jogo do tigrinho", total: null, ads: 0 },
+    ],
+    analysis: "## Resumo\n- Nicho grande e concentrado: os 2 maiores têm a maior parte das cópias.\n\n## Quem domina\n- **Bet Sol** (betsol.bet.br): aparece em 4 das 5 palavras, oferta de rodadas grátis no cadastro.\n\n## Riscos de política e regulação\n- 1 anunciante leva para domínio fora do .bet.br.\n\n_(exemplo do modo demonstração)_",
+    analysis_model: "gemini-flash-lite-latest", analysis_at: minsAgo(15),
+  },
   { id: 3, term: "kit cabelo", kind: "palavra", match: "qualquer", country: "BR", status: "erro", total_results: null, ads_found: null, offers_found: null, google_ads: null, message: "A Meta pediu login para a busca — o IP do robô pode ter sido bloqueado.", requested_at: minsAgo(60 * 26), started_at: minsAgo(60 * 26), finished_at: minsAgo(60 * 26) },
 ];
 const sAd = (search_id: number, position: number, library_id: string, offer_key: string, advertiser: string, domain: string | null, body: string, start_date: string, copies: number, site_match: boolean | null = null): Row => ({
   search_id, position, library_id, offer_key, advertiser, domain, body, start_date, copies, cta: "Comprar agora", dest_type: "site",
   page_url: null, landing_url: domain ? `https://${domain}/` : null, thumb_url: null, thumb_path: null, media_type: position % 2 ? "video" : "image", site_match,
 });
+const nAd = (position: number, library_id: string, offer_key: string, advertiser: string, domain: string | null, body: string, start: number, copies: number, terms: string[], dest_type = "site", cta = "Cadastre-se"): Row => ({
+  ...sAd(4, position, library_id, offer_key, advertiser, domain, body, daysAgo(start), copies), terms, dest_type, cta,
+});
 const SEARCH_ADS: Row[] = [
+  nAd(0, "940001", "d:betsol.bet.br", "Bet Sol", "betsol.bet.br", "Cadastre-se e ganhe rodadas grátis no cassino online. Saque via Pix em minutos. Jogue com responsabilidade. +18", 60, 22, ["cassino online", "rodadas grátis", "saque via pix"]),
+  nAd(1, "940002", "d:betsol.bet.br", "Bet Sol", "betsol.bet.br", "Bônus de boas-vindas para novos jogadores. Proibido para menores de 18 anos.", 21, 9, ["bônus de boas-vindas", "cassino online"]),
+  nAd(2, "940003", "d:lunacassino.bet.br", "Luna Cassino", "lunacassino.bet.br", "O cassino online que paga na hora: saque via Pix. +18 · jogue com responsabilidade.", 35, 14, ["cassino online", "saque via pix"]),
+  nAd(3, "940004", "d:lunacassino.bet.br", "Luna Cassino", "lunacassino.bet.br", "50 rodadas grátis no primeiro depósito.", 6, 8, ["rodadas grátis"]),
+  nAd(4, "940005", "d:rodadamax.com", "Rodada Max", "rodadamax.com", "Rodadas grátis todo dia! Chama no WhatsApp e pegue seu bônus de boas-vindas.", 9, 7, ["rodadas grátis", "bônus de boas-vindas"], "whatsapp", "Enviar mensagem"),
+  nAd(5, "940006", "a:dicas de slots", "Dicas de Slots", null, "Os melhores horários do cassino online, grupo VIP gratuito.", 3, 1, ["cassino online"], "mensagem", "Enviar mensagem"),
+  nAd(6, "940007", "d:rodadamax.com", "Rodada Max", "rodadamax.com", "Saque via Pix sem burocracia.", 4, 2, ["saque via pix"], "whatsapp", "Enviar mensagem"),
   sAd(1, 0, "910001", "d:brmoveis.com.br", "BR Móveis", "brmoveis.com.br", "🚨 PREÇO DE FÁBRICA — PAGAMENTO NA ENTREGA! 🚨 Aqui é DIRETO da fábrica.", daysAgo(40), 11),
   sAd(1, 1, "910002", "d:sofaconforto.com.br", "Sofá Conforto", "sofaconforto.com.br", "Receba seu sofá e só pague na entrega. Frete grátis para todo o Brasil.", daysAgo(12), 6),
   sAd(1, 2, "910003", "d:brmoveis.com.br", "BR Móveis", "brmoveis.com.br", "Guarda-roupa 6 portas com pagamento na entrega. Últimas unidades!", daysAgo(9), 3),

@@ -6,6 +6,8 @@ import { countryOfKey, db, STATUSES, validKey } from "@/lib/db";
 import { dispatchSearch, siteOf } from "@/lib/pesquisa";
 import { geminiText } from "@/lib/gemini";
 import { myVersionPrompt, type MyInput } from "@/lib/kit";
+import { analysisPrompt, cleanTerms, groupNiche, parseTermsReply, presetTerms, termsPrompt, type TermStat } from "@/lib/nicho";
+import type { SearchAdRow } from "@/lib/pesquisa";
 
 const refresh = (key: string) => {
   revalidatePath("/");
@@ -148,6 +150,114 @@ export async function trackSearch(form: FormData) {
     revalidatePath("/palavras-chave");
   }
   revalidatePath("/pesquisar");
+}
+
+/* ---------------- Nicho (várias palavras de um nicho de uma vez) ---------------- */
+
+/** Palavras do nicho: as que a pessoa escreveu; senão a IA; senão o pacote pronto; senão o próprio nome. */
+async function termsFor(niche: string, country: string, typed: string): Promise<{ terms: string[]; note: string | null }> {
+  const own = cleanTerms(typed);
+  if (own.length) return { terms: own, note: null };
+  const preset = presetTerms(niche, country);
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const r = await geminiText(termsPrompt(niche, country), 20_000);
+      const ai = parseTermsReply(r.text);
+      // a IA manda primeiro; o pacote pronto completa se ela devolver pouca coisa
+      if (ai.length >= 4) return { terms: cleanTerms([...ai, ...preset]), note: null };
+    } catch (e) {
+      if (!preset.length) return { terms: cleanTerms([niche]), note: `A IA não respondeu (${(e as Error).message.slice(0, 120)}); busquei só "${niche}". Edite as palavras e busque de novo.` };
+    }
+  }
+  if (preset.length) return { terms: preset, note: null };
+  return {
+    terms: cleanTerms([niche]),
+    note: process.env.GEMINI_API_KEY ? `Não achei palavras para o nicho; busquei só "${niche}".` : `Sem GEMINI_API_KEY na Vercel, busquei só "${niche}". Edite as palavras e busque de novo.`,
+  };
+}
+
+/** Cria a pesquisa por nicho e liga o robô; o painel acompanha em /nicho?id=... */
+export async function startNiche(form: FormData) {
+  const niche = String(form.get("niche") ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+  const country = String(form.get("country") ?? "BR").toUpperCase();
+  if (niche.length < 2 || !/^[A-Z]{2}$/.test(country)) redirect("/nicho?erro=termo");
+  if (process.env.RADAR_DEMO === "1") redirect("/nicho?id=4");
+  const { terms, note } = await termsFor(niche, country, String(form.get("terms") ?? ""));
+  const client = db();
+  const { data, error } = await client
+    .from("searches")
+    .insert({ term: niche.toLowerCase(), kind: "nicho", match: "exata", country, terms, message: note })
+    .select("id")
+    .single();
+  if (error || !data) redirect(`/nicho?erro=banco&msg=${encodeURIComponent(error?.message ?? "sem resposta")}`);
+  const id = (data as { id: number }).id;
+  const problem = await dispatchSearch(id);
+  if (problem) await client.from("searches").update({ message: [note, problem].filter(Boolean).join(" ") }).eq("id", id);
+  revalidatePath("/nicho");
+  redirect(`/nicho?id=${id}`);
+}
+
+/** Busca o nicho de novo (com as palavras editadas, se mudaram). */
+export async function rerunNiche(form: FormData) {
+  const id = Number(form.get("id"));
+  if (!Number.isFinite(id) || id <= 0) return;
+  if (process.env.RADAR_DEMO === "1") redirect(`/nicho?id=${id}`);
+  const terms = cleanTerms(String(form.get("terms") ?? ""));
+  const client = db();
+  await client
+    .from("searches")
+    .update({
+      status: "pendente", message: null, requested_at: new Date().toISOString(), started_at: null, finished_at: null,
+      ...(terms.length ? { terms } : {}),
+    })
+    .eq("id", id)
+    .eq("kind", "nicho");
+  const problem = await dispatchSearch(id);
+  if (problem) await client.from("searches").update({ message: problem }).eq("id", id);
+  revalidatePath("/nicho");
+  redirect(`/nicho?id=${id}`);
+}
+
+/** Coloca as palavras do nicho na coleta automática (entram no ranking e nos alertas). */
+export async function trackNiche(form: FormData) {
+  const id = Number(form.get("id"));
+  if (!Number.isFinite(id) || id <= 0 || process.env.RADAR_DEMO === "1") return;
+  const client = db();
+  const { data } = await client.from("searches").select("terms, country").eq("id", id).maybeSingle();
+  const s = data as { terms: string[] | null; country: string } | null;
+  if (!s?.terms?.length) return;
+  await client.from("keywords").upsert(s.terms.map((term) => ({ term, country: s.country, active: true })), { onConflict: "term,country" });
+  revalidatePath("/palavras-chave");
+  revalidatePath("/nicho");
+}
+
+export type NicheAnalysisState = { ok: boolean; message: string };
+
+/** Raio-X do nicho: a IA lê os anunciantes e anúncios achados e escreve a análise de mercado. */
+export async function analyzeNiche(_prev: NicheAnalysisState, form: FormData): Promise<NicheAnalysisState> {
+  const id = Number(form.get("id"));
+  if (!Number.isFinite(id) || id <= 0) return { ok: false, message: "Pesquisa inválida." };
+  if (process.env.RADAR_DEMO === "1") return { ok: true, message: "Modo demonstração: a análise de exemplo já está abaixo." };
+  const client = db();
+  const [{ data: sRaw }, { data: adsRaw }] = await Promise.all([
+    client.from("searches").select("term, country, status, term_stats").eq("id", id).maybeSingle(),
+    client.from("search_ads").select("*").eq("search_id", id).order("position").limit(1000),
+  ]);
+  const s = sRaw as { term: string; country: string; status: string; term_stats: TermStat[] | null } | null;
+  if (!s || s.status !== "pronta") return { ok: false, message: "Espere a busca terminar." };
+  const groups = groupNiche((adsRaw ?? []) as SearchAdRow[]);
+  if (!groups.length) return { ok: false, message: "Nenhum anúncio para analisar." };
+  try {
+    const r = await geminiText(analysisPrompt({ niche: s.term, country: s.country, stats: s.term_stats ?? [], groups }));
+    await client
+      .from("searches")
+      .update({ analysis: r.text.slice(0, 40_000), analysis_model: r.model, analysis_at: new Date().toISOString() })
+      .eq("id", id);
+    revalidatePath("/nicho");
+    return { ok: true, message: `Pronto (${r.model}).` };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
 }
 
 export type MyVersionState = { ok: boolean; message: string };

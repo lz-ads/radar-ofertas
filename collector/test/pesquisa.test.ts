@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { brandOf, buildOutcome, matchesSite, rootOf, siteOf } from "../src/pesquisa.js";
+import { brandOf, buildOutcome, matchesSite, nicheTerms, rootOf, siteOf } from "../src/pesquisa.js";
 import { metaLibraryUrl } from "../src/sources/metaBrowser.js";
 import type { MetaAd } from "../src/types.js";
 
@@ -69,4 +69,33 @@ test("pesquisa: link da Meta com frase exata ou qualquer palavra", () => {
   assert.match(any, /search_type=keyword_unordered/);
   assert.match(any, /country=US/);
   assert.doesNotMatch(any, /%22/);
+});
+
+test("nicho: limpa as palavras (minúsculas, sem aspas, sem repetidas, até o limite)", () => {
+  assert.deepEqual(nicheTerms(['"Rodadas Grátis"', "rodadas  grátis", "", "x", "Cassino Online", "bônus"], "bet", 3), ["rodadas grátis", "cassino online", "bônus"]);
+  // sem lista: usa o nome do nicho
+  assert.deepEqual(nicheTerms(null, "Cassino Online"), ["cassino online"]);
+  assert.deepEqual(nicheTerms(["", "  "], "bet"), ["bet"]);
+});
+
+test("nicho: junta as palavras, marca em quais o anúncio apareceu e agrupa por anunciante", () => {
+  const out = buildOutcome(
+    [
+      { keyword: "rodadas grátis", totalResults: "~3.000 resultados", ads: [
+        ad({ libraryId: "1", advertiser: "Bet A", domain: "beta.bet.br", copies: 5 }),
+        ad({ libraryId: "2", advertiser: "Cassino B", domain: "cassinob.bet.br" }),
+      ] },
+      { keyword: "cassino online", totalResults: "~9.000 resultados", ads: [
+        ad({ libraryId: "1", advertiser: "Bet A", domain: "beta.bet.br", copies: 7 }),
+        ad({ libraryId: "3", advertiser: "Bet A", domain: "beta.bet.br" }),
+      ] },
+    ],
+    "BR",
+    null,
+  );
+  assert.deepEqual(out.map((a) => a.libraryId), ["1", "2", "3"]);
+  const first = out.find((a) => a.libraryId === "1")!;
+  assert.deepEqual(first.keywords, ["rodadas grátis", "cassino online"]);
+  assert.equal(first.copies, 7);
+  assert.equal(new Set(out.filter((a) => a.advertiser === "Bet A").map((a) => a.offerKey)).size, 1);
 });

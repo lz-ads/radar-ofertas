@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/", file: "ranking", ext: ".tsx" },
   { href: "/pesquisar", file: "pesquisar", ext: ".sh" },
+  { href: "/nicho", file: "nicho", ext: ".sh" },
   { href: "/funil", file: "funil", ext: ".tsx" },
   { href: "/espionagem", file: "espionagem", ext: ".tsx" },
   { href: "/tiktok", file: "tiktok", ext: ".tsx" },

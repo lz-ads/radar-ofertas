@@ -11,18 +11,28 @@ import { esc, panelUrl, sendTelegram } from "./telegram.js";
 import type { KeywordResult, MetaAd } from "./types.js";
 
 /**
- * Pesquisar: busca sob demanda pedida pelo painel. A pessoa digita uma palavra ou um site
- * e o robô procura anúncios ATIVOS na Biblioteca da Meta (e, para site, conta os anúncios no Google).
+ * Pesquisar: busca sob demanda pedida pelo painel. A pessoa digita uma palavra, um site ou um nicho
+ * e o robô procura anúncios ATIVOS na Biblioteca da Meta (para site, também conta os anúncios no Google;
+ * para nicho, busca cada palavra do nicho e junta tudo).
  * Os resultados ficam em `search_ads`, separados do ranking (não mexem no score nem nos alertas).
  */
 
 export interface SearchRequest {
   id: number;
   term: string;
-  kind: "palavra" | "site";
+  kind: "palavra" | "site" | "nicho";
   match: "exata" | "qualquer";
   country: string;
   requested_at: string;
+  terms?: string[] | null; // só nicho: palavras que o painel gerou para o nicho
+}
+
+/** Resultado de cada palavra do nicho. */
+export interface TermStat {
+  term: string;
+  total: string | null; // o que a Meta mostra ("~6.900 resultados")
+  ads: number;          // anúncios lidos
+  error?: string;
 }
 
 export interface SearchOutcome {
@@ -30,6 +40,22 @@ export interface SearchOutcome {
   total: string | null;
   google: number | null;
   message: string;
+  termStats?: TermStat[];
+}
+
+/** Limpa a lista de palavras do nicho: minúsculas, sem repetidas, sem vazias, até `max` (sem lista, usa o nome do nicho). */
+export function nicheTerms(terms: (string | null | undefined)[] | null | undefined, fallback: string, max = num("NICHE_MAX_TERMS", 10)): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const list = (terms ?? []).filter((t) => String(t ?? "").trim());
+  for (const raw of list.length ? list : [fallback]) {
+    const t = String(raw ?? "").replace(/["“”]/g, "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
+    if (t.length < 2 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 const num = (name: string, def: number) => Number(process.env[name] || def);
@@ -81,11 +107,56 @@ export function buildOutcome(
   return out;
 }
 
-/** Faz a busca (sem banco): Meta e, para site, a contagem do Google. */
-export async function executeSearch(
-  req: Pick<SearchRequest, "term" | "kind" | "match" | "country">,
-  hints: Map<string, string> = new Map(),
+/**
+ * Nicho: busca cada palavra (frase exata) e junta tudo. Uma palavra que falha não derruba as outras;
+ * se as duas primeiras falharem (ex.: a Meta pediu login), desiste logo.
+ */
+async function executeNiche(
+  req: Pick<SearchRequest, "term" | "country" | "terms">,
+  hints: Map<string, string>,
+  onProgress?: (msg: string) => Promise<void>,
 ): Promise<SearchOutcome> {
+  const country = req.country.toUpperCase();
+  const terms = nicheTerms(req.terms, req.term);
+  const source = new MetaBrowserSource({ scrolls: num("NICHE_SCROLLS", 10), maxCards: num("NICHE_MAX_CARDS", 80), country });
+  const results: KeywordResult[] = [];
+  const stats: TermStat[] = [];
+  try {
+    for (let i = 0; i < terms.length; i++) {
+      const term = terms[i];
+      await onProgress?.(`palavra ${i + 1} de ${terms.length}: "${term}"`).catch(() => {});
+      try {
+        const r = await source.searchKeyword(term, { match: "exact" });
+        results.push(r);
+        stats.push({ term, total: r.totalResults, ads: r.ads.length });
+      } catch (e) {
+        const msg = (e as Error).message.split("\n")[0].slice(0, 200);
+        console.warn(`[nicho] "${term}":`, msg);
+        stats.push({ term, total: null, ads: 0, error: msg });
+        if (i === 1 && stats.every((s) => s.error)) throw new Error(`As primeiras palavras falharam: ${msg}`);
+      }
+      if (i < terms.length - 1) await jitter(2000, 4000);
+    }
+  } finally {
+    await source.close();
+  }
+  if (!results.length) throw new Error(`Nenhuma palavra do nicho deu certo: ${stats[0]?.error ?? "sem resposta"}`);
+  const failed = stats.filter((s) => s.error).length;
+  const empty = stats.filter((s) => !s.error && s.ads === 0).map((s) => `"${s.term}"`);
+  const message = [
+    failed ? `${failed} de ${terms.length} palavras falharam.` : "",
+    empty.length ? `Sem anúncios ativos: ${empty.join(", ")}.` : "",
+  ].filter(Boolean).join(" ");
+  return { ads: buildOutcome(results, country, null, hints), total: null, google: null, message, termStats: stats };
+}
+
+/** Faz a busca (sem banco): Meta e, para site, a contagem do Google; nicho busca várias palavras. */
+export async function executeSearch(
+  req: Pick<SearchRequest, "term" | "kind" | "match" | "country" | "terms">,
+  hints: Map<string, string> = new Map(),
+  onProgress?: (msg: string) => Promise<void>,
+): Promise<SearchOutcome> {
+  if (req.kind === "nicho") return executeNiche(req, hints, onProgress);
   const country = req.country.toUpperCase();
   const site = req.kind === "site" ? siteOf(req.term) ?? req.term : null;
   const source = new MetaBrowserSource({ scrolls: num("SEARCH_SCROLLS", 15), maxCards: num("SEARCH_MAX_CARDS", 120), country });
@@ -132,15 +203,14 @@ export async function executeSearch(
 /* ---------------- Banco ---------------- */
 
 const STUCK_MIN = 25;
+const STUCK_NICHE_MIN = 60; // nicho busca até 10 palavras: demora mais
 
 /** Pesquisa que ficou "rodando" (robô caiu no meio) vira erro, para dar para pedir de novo. */
 async function failStuck(client: SupabaseClient) {
-  const limit = new Date(Date.now() - STUCK_MIN * 60_000).toISOString();
-  await client
-    .from("searches")
-    .update({ status: "erro", message: "O robô parou no meio da pesquisa. Clique em pesquisar de novo.", finished_at: new Date().toISOString() })
-    .eq("status", "rodando")
-    .lt("started_at", limit);
+  const before = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+  const fail = { status: "erro", message: "O robô parou no meio da pesquisa. Clique em pesquisar de novo.", finished_at: new Date().toISOString() };
+  await client.from("searches").update(fail).eq("status", "rodando").neq("kind", "nicho").lt("started_at", before(STUCK_MIN));
+  await client.from("searches").update(fail).eq("status", "rodando").eq("kind", "nicho").lt("started_at", before(STUCK_NICHE_MIN));
 }
 
 /** Pega a próxima pesquisa pendente (a mais antiga) e marca como "rodando". */
@@ -156,7 +226,7 @@ async function claimNext(client: SupabaseClient): Promise<SearchRequest | null> 
       .update({ status: "rodando", started_at: new Date().toISOString(), message: null })
       .eq("id", id)
       .eq("status", "pendente")
-      .select("id, term, kind, match, country, requested_at");
+      .select("*"); // "*" funciona antes e depois da migração 008 (coluna terms)
     if (upd.error) throw new Error(`searches: ${upd.error.message}`);
     if (upd.data?.length) return upd.data[0] as SearchRequest;
   }
@@ -214,6 +284,7 @@ async function saveOutcome(client: SupabaseClient, req: SearchRequest, out: Sear
     thumb_url: a.thumbUrl ?? null,
     media_type: a.mediaType ?? null,
     site_match: a.siteMatch,
+    ...(req.kind === "nicho" ? { terms: a.keywords } : {}),
   }));
   for (let i = 0; i < rows.length; i += 200) {
     const res = await client.from("search_ads").insert(db.wellFormed(rows.slice(i, i + 200)));
@@ -229,6 +300,7 @@ async function saveOutcome(client: SupabaseClient, req: SearchRequest, out: Sear
       offers_found: offers,
       total_results: out.total,
       google_ads: out.google,
+      ...(out.termStats ? { term_stats: out.termStats, terms: out.termStats.map((t) => t.term) } : {}),
       message: out.message || null,
       finished_at: new Date().toISOString(),
     })
@@ -266,17 +338,22 @@ export async function processPendingSearches(client: SupabaseClient, max = num("
     const t0 = Date.now();
     try {
       const hints = await db.loadAliasHints(client, req.country.toUpperCase()).catch(() => new Map<string, string>());
-      const out = await executeSearch(req, hints);
+      const progress = async (msg: string) => {
+        await client.from("searches").update({ message: msg }).eq("id", req.id);
+      };
+      const out = await executeSearch(req, hints, progress);
       const r = await saveOutcome(client, req, out);
       done++;
-      const line = `"${req.term}" (${req.country}): ${out.ads.length} anúncios ativos, ${r.offers} anunciantes${out.google !== null ? `, Google ${out.google}` : ""}, ${Math.round((Date.now() - t0) / 1000)}s`;
+      const label = req.kind === "nicho" ? `nicho "${req.term}" (${out.termStats?.length ?? 0} palavras)` : `"${req.term}"`;
+      const line = `${label} (${req.country}): ${out.ads.length} anúncios ativos, ${r.offers} anunciantes${out.google !== null ? `, Google ${out.google}` : ""}, ${Math.round((Date.now() - t0) / 1000)}s`;
       console.log(`[pesquisa] ${line}`);
       notes.push(line);
       // quem pediu provavelmente saiu da página (esperou mais de 3 min): avisa no Telegram
       if (Date.now() - Date.parse(req.requested_at) > 3 * 60_000) {
+        const page = req.kind === "nicho" ? "nicho" : "pesquisar";
         await sendTelegram(
-          `🔎 <b>Pesquisa pronta:</b> ${esc(req.term)} (${esc(req.country)})\n${out.ads.length} anúncios ativos de ${r.offers} anunciantes` +
-            `${out.google !== null ? ` · ${out.google} no Google` : ""}\n<a href="${panelUrl()}/pesquisar?id=${req.id}">ver resultado</a>`,
+          `🔎 <b>${req.kind === "nicho" ? "Nicho pronto" : "Pesquisa pronta"}:</b> ${esc(req.term)} (${esc(req.country)})\n${out.ads.length} anúncios ativos de ${r.offers} anunciantes` +
+            `${out.google !== null ? ` · ${out.google} no Google` : ""}\n<a href="${panelUrl()}/${page}?id=${req.id}">ver resultado</a>`,
         ).catch(() => {});
       }
     } catch (e) {

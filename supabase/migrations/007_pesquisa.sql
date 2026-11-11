@@ -5,7 +5,7 @@
 create table if not exists searches (
   id            bigint generated always as identity primary key,
   term          text not null,
-  kind          text not null default 'palavra',  -- palavra | site
+  kind          text not null default 'palavra',  -- palavra | site | nicho
   match         text not null default 'exata',    -- exata | qualquer (só para palavra)
   country       text not null default 'BR',
   status        text not null default 'pendente', -- pendente | rodando | pronta | erro

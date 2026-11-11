@@ -81,6 +81,7 @@ cd web && npm install && RADAR_DEMO=1 npm run dev
 | Alertas | Telegram quando uma oferta entra no top 20 ou dispara em cópias | secrets `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` |
 | Funil | ☆ no ranking, status e notas por oferta, página `/funil` | nada |
 | Pesquisar | Página `/pesquisar`: digite uma palavra ou site e o robô busca na hora os anúncios ativos na Biblioteca da Meta (site também conta os anúncios no Google) | migração `007_pesquisa.sql` + Vercel: `GITHUB_TOKEN` (veja abaixo) |
+| Nicho | Página `/nicho`: digite um nicho (ex.: bet / cassino online). A IA gera até 10 palavras do nicho, o robô busca todas, junta por anunciante e a IA faz o raio-X do nicho | migração `008_nicho.sql` (+ o mesmo `GITHUB_TOKEN`; `GEMINI_API_KEY` na Vercel para a IA) |
 | Status | Página `/status` com a saúde de cada etapa + aviso de falha no Telegram + vigia diário da Vercel | Vercel: `CRON_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 
 ### Chave do Gemini
@@ -103,6 +104,18 @@ O painel liga o robô no GitHub Actions (workflow **Pesquisar agora**) assim que
 3. Na Vercel, crie a variável `GITHUB_TOKEN` com esse token e faça um novo deploy. Se o repositório não for `lz-ads/radar-ofertas`, crie também `GITHUB_REPO` (ex.: `minhaconta/radar-ofertas`).
 
 Sem o token a página funciona, mas a pesquisa só roda na próxima coleta automática (6h, 12h ou 18h). Para testar no computador sem banco: `cd collector && npm run search -- --termo=loja.com.br`.
+
+### Pesquisa por nicho (página `/nicho`)
+Digite um nicho, como *bet / cassino online*, *emagrecimento* ou *renda extra*.
+
+1. A IA (Gemini) transforma o nicho em até 10 palavras que os anúncios desse nicho usam. Alguns nichos (apostas, emagrecimento, renda extra) têm um pacote pronto, que vale mesmo sem a IA. Você também pode escrever as suas palavras.
+2. O robô busca cada palavra (frase exata) na Biblioteca da Meta e junta tudo por anunciante. Leva cerca de 1 minuto por palavra.
+3. O painel mostra o tamanho de cada palavra na Meta, a concentração do nicho, quem está entrando forte e o ranking por **força** (anúncios ativos + cópias + 5 × palavras em que o anunciante aparece).
+4. O botão **Gerar raio-X do nicho com IA** escreve a análise de mercado: quem domina, ângulos, ganchos, estrutura de oferta, brechas, riscos e próximos passos.
+
+Para ligar: rode `supabase/migrations/008_nicho.sql` no SQL Editor do Supabase. Para a IA, crie também a variável `GEMINI_API_KEY` na Vercel (a mesma chave do GitHub). Para acompanhar o nicho sempre, use **＋ coletar sempre**: as palavras viram palavras-chave da coleta automática.
+
+Teste no computador sem banco: `cd collector && npm run search -- --nicho="cassino online" --termos="rodadas grátis,bônus de boas-vindas"`.
 
 ### Banco
 Instalação nova: rode `supabase/schema.sql`. Instalação antiga: rode, em ordem, os arquivos de `supabase/migrations/` que ainda não rodou.

@@ -561,3 +561,16 @@ a.status-btn { display: inline-block; }
   .sg-head { flex-wrap: wrap; }
   .sg-actions { justify-content: flex-start; width: 100%; }
 }
+
+/* ---------- Nicho ---------- */
+.niche-own { margin-top: 10px; }
+.niche-own summary, .niche-edit summary { cursor: pointer; color: var(--ion); font-size: 12px; }
+.niche-own textarea.field, .niche-edit textarea.field { display: block; width: 100%; margin-top: 8px; font: 13px var(--mono); resize: vertical; }
+.niche-edit form { display: grid; gap: 10px; justify-items: start; margin-top: 4px; }
+.niche-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; }
+.niche-examples form { margin: 0; }
+.badge.as-btn { background: transparent; cursor: pointer; }
+.badge.as-btn:hover { color: var(--frost); border-color: var(--ion); }
+.niche-ai-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.sg-terms { margin-top: 8px; }
+.search-group:target { outline: 1px solid var(--signal); }

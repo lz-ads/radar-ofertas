@@ -5,7 +5,7 @@ export const NICHES = [
   "Emagrecimento", "Beleza e skincare", "Cabelo", "Saúde e bem-estar", "Fitness", "Moda e acessórios",
   "Casa e decoração", "Cozinha e receitas", "Pets", "Infantil e maternidade", "Educação e concursos",
   "Idiomas", "Profissões e cursos técnicos", "Renda extra e negócios", "Finanças", "Fé e religião",
-  "Relacionamento", "Tecnologia e gadgets", "Automotivo", "Serviços locais", "Outros",
+  "Relacionamento", "Tecnologia e gadgets", "Automotivo", "Apostas e cassino", "Serviços locais", "Outros",
 ] as const;
 
 export const KINDS = ["produto fisico", "infoproduto", "nutra", "servico", "app", "outro"] as const;

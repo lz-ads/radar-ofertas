@@ -8,6 +8,7 @@ import { closeBrowser } from "./sources/browser.js";
  *
  * Teste local sem banco:  npm run search -- --termo="pagamento na entrega" --pais=BR
  *                         npm run search -- --termo=loja.com.br
+ *                         npm run search -- --nicho="cassino online" --termos="rodadas grátis,bônus de boas-vindas"
  */
 const arg = (name: string) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? "";
 
@@ -18,9 +19,14 @@ async function main() {
   try {
     if (!client) {
       const term = arg("termo");
-      if (!term) throw new Error('Sem banco configurado: passe --termo="..." para testar (ex.: --termo=loja.com.br).');
-      const site = siteOf(term);
-      const out = await executeSearch({ term: site ?? term, kind: site ? "site" : "palavra", match: arg("qualquer") ? "qualquer" : "exata", country: (arg("pais") || "BR").toUpperCase() });
+      const niche = arg("nicho");
+      if (!term && !niche) throw new Error('Sem banco configurado: passe --termo="..." ou --nicho="..." para testar (ex.: --termo=loja.com.br).');
+      const site = niche ? null : siteOf(term);
+      const country = (arg("pais") || "BR").toUpperCase();
+      const out = niche
+        ? await executeSearch({ term: niche, kind: "nicho", match: "exata", country, terms: arg("termos").split(",") }, new Map(), async (m) => console.log(`[nicho] ${m}`))
+        : await executeSearch({ term: site ?? term, kind: site ? "site" : "palavra", match: arg("qualquer") ? "qualquer" : "exata", country });
+      if (out.termStats) console.table(out.termStats);
       console.log(`total na Meta: ${out.total ?? "?"} · lidos: ${out.ads.length} · Google: ${out.google ?? "—"} ${out.message}`);
       console.table(out.ads.slice(0, 30).map((a) => ({ anunciante: a.advertiser, dominio: a.domain, oferta: a.offerKey, copias: a.copies, desde: a.startDate, leva_ao_site: a.siteMatch })));
       await writeFile("out-pesquisa.json", JSON.stringify(out, null, 2));

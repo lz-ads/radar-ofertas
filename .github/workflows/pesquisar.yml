@@ -1,7 +1,7 @@
 name: Pesquisar agora
 run-name: "Pesquisa ${{ github.event.inputs.id || 'pendentes' }}"
 
-# Disparado pelo painel (página Pesquisar) quando alguém busca uma palavra ou site.
+# Disparado pelo painel (páginas Pesquisar e Nicho) quando alguém busca uma palavra, site ou nicho.
 # Roda TODAS as pesquisas pendentes, então nenhuma se perde se duas chegarem juntas.
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ permissions:
 jobs:
   pesquisar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: collector

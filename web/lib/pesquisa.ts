@@ -5,7 +5,7 @@ export type SearchStatus = "pendente" | "rodando" | "pronta" | "erro";
 export interface SearchRow {
   id: number;
   term: string;
-  kind: "palavra" | "site";
+  kind: "palavra" | "site" | "nicho";
   match: "exata" | "qualquer";
   country: string;
   status: SearchStatus;
@@ -17,6 +17,12 @@ export interface SearchRow {
   requested_at: string;
   started_at: string | null;
   finished_at: string | null;
+  // só nicho (migração 008)
+  terms?: string[] | null;
+  term_stats?: { term: string; total: string | null; ads: number; error?: string }[] | null;
+  analysis?: string | null;
+  analysis_model?: string | null;
+  analysis_at?: string | null;
 }
 
 export interface SearchAdRow {
@@ -36,6 +42,7 @@ export interface SearchAdRow {
   thumb_path: string | null;
   media_type: string | null;
   site_match: boolean | null;
+  terms?: string[] | null; // só nicho: palavras em que o anúncio apareceu
 }
 
 /** "https://www.Loja.com.br/produto?x=1" -> "loja.com.br"; frase com espaço -> null (mesma regra do robô) */

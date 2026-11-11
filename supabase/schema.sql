@@ -439,7 +439,7 @@ alter table runs                enable row level security;
 create table if not exists searches (
   id            bigint generated always as identity primary key,
   term          text not null,
-  kind          text not null default 'palavra',  -- palavra | site
+  kind          text not null default 'palavra',  -- palavra | site | nicho
   match         text not null default 'exata',    -- exata | qualquer (só para palavra)
   country       text not null default 'BR',
   status        text not null default 'pendente', -- pendente | rodando | pronta | erro
@@ -479,3 +479,12 @@ create table if not exists search_ads (
 
 alter table searches   enable row level security;
 alter table search_ads enable row level security;
+
+-- ---------- Pesquisa por nicho (migração 008) ----------
+alter table searches add column if not exists terms          text[];   -- palavras buscadas (só nicho)
+alter table searches add column if not exists term_stats     jsonb;    -- [{term, total, ads, error}] por palavra
+alter table searches add column if not exists analysis       text;     -- raio-X do nicho (markdown, IA)
+alter table searches add column if not exists analysis_model text;
+alter table searches add column if not exists analysis_at    timestamptz;
+alter table search_ads add column if not exists terms text[];          -- em quais palavras do nicho o anúncio apareceu
+create index if not exists searches_kind_idx on searches (kind, requested_at desc);
