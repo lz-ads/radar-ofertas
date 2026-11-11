@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { countryOfKey, db, STATUSES, validKey } from "@/lib/db";
+import { dispatchSearch, siteOf } from "@/lib/pesquisa";
 import { geminiText } from "@/lib/gemini";
 import { myVersionPrompt, type MyInput } from "@/lib/kit";
 
@@ -86,6 +88,66 @@ export async function removeWatch(form: FormData) {
   await db().from("watchlist").delete().eq("id", id);
   revalidatePath("/espionagem");
   revalidatePath("/");
+}
+
+/* ---------------- Pesquisar (busca sob demanda) ---------------- */
+
+/** Cria a pesquisa e liga o robô na hora; o painel acompanha em /pesquisar?id=... */
+export async function startSearch(form: FormData) {
+  const raw = String(form.get("term") ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const country = String(form.get("country") ?? "BR").toUpperCase();
+  const match = form.get("match") === "qualquer" ? "qualquer" : "exata";
+  if (raw.length < 2 || !/^[A-Z]{2}$/.test(country)) redirect("/pesquisar?erro=termo");
+  if (process.env.RADAR_DEMO === "1") redirect("/pesquisar?id=1");
+
+  const site = siteOf(raw);
+  const term = site ?? raw.toLowerCase();
+  const client = db();
+  const { data, error } = await client
+    .from("searches")
+    .insert({ term, kind: site ? "site" : "palavra", match, country })
+    .select("id")
+    .single();
+  if (error || !data) redirect(`/pesquisar?erro=banco&msg=${encodeURIComponent(error?.message ?? "sem resposta")}`);
+  const id = (data as { id: number }).id;
+  const problem = await dispatchSearch(id);
+  if (problem) await client.from("searches").update({ message: problem }).eq("id", id);
+  revalidatePath("/pesquisar");
+  redirect(`/pesquisar?id=${id}`);
+}
+
+/** Refaz uma pesquisa (atualizar resultado ou tentar de novo depois de erro). */
+export async function retrySearch(form: FormData) {
+  const id = Number(form.get("id"));
+  if (!Number.isFinite(id) || id <= 0) return;
+  if (process.env.RADAR_DEMO === "1") redirect(`/pesquisar?id=${id}`);
+  const client = db();
+  await client
+    .from("searches")
+    .update({ status: "pendente", message: null, requested_at: new Date().toISOString(), started_at: null, finished_at: null })
+    .eq("id", id);
+  const problem = await dispatchSearch(id);
+  if (problem) await client.from("searches").update({ message: problem }).eq("id", id);
+  revalidatePath("/pesquisar");
+  redirect(`/pesquisar?id=${id}`);
+}
+
+/** Leva o termo pesquisado para a coleta automática: palavra vira palavra-chave, site vai para a espionagem. */
+export async function trackSearch(form: FormData) {
+  const id = Number(form.get("id"));
+  if (!Number.isFinite(id) || id <= 0 || process.env.RADAR_DEMO === "1") return;
+  const client = db();
+  const { data } = await client.from("searches").select("term, kind, country").eq("id", id).maybeSingle();
+  const s = data as { term: string; kind: string; country: string } | null;
+  if (!s) return;
+  if (s.kind === "site") {
+    await client.from("watchlist").upsert({ label: s.term, term: s.term, country: s.country }, { onConflict: "term,country" });
+    revalidatePath("/espionagem");
+  } else {
+    await client.from("keywords").upsert({ term: s.term, country: s.country, active: true }, { onConflict: "term,country" });
+    revalidatePath("/palavras-chave");
+  }
+  revalidatePath("/pesquisar");
 }
 
 export type MyVersionState = { ok: boolean; message: string };

@@ -164,7 +164,28 @@ const LANDINGS: Row[] = [
   { url: "https://constlivre.com.br/kit-desafio-90-dias", shot_path: "p/demo.webp", currency: "BRL", title: "Desafio 90 Dias ConstLivre", platform: "Shopify", checkout: "Yampi", prices: [197, 297, 497], price_min: 197, price_max: 497, installments: "12x de R$ 41,42", cod: false, has_vsl: true, has_countdown: true, has_whatsapp: true, pixels: ["Meta", "TikTok", "GTM"], error: null, checked_at: minsAgo(41) },
 ];
 
+const SEARCHES: Row[] = [
+  { id: 1, term: "pagamento na entrega", kind: "palavra", match: "exata", country: "BR", status: "pronta", total_results: "~2.300 resultados", ads_found: 5, offers_found: 3, google_ads: null, message: null, requested_at: minsAgo(6), started_at: minsAgo(5), finished_at: minsAgo(4) },
+  { id: 2, term: "glowpatch.com", kind: "site", match: "exata", country: "US", status: "pronta", total_results: "~40 resultados", ads_found: 3, offers_found: 2, google_ads: 140, message: null, requested_at: minsAgo(60 * 5), started_at: minsAgo(60 * 5 - 1), finished_at: minsAgo(60 * 5 - 2) },
+  { id: 3, term: "kit cabelo", kind: "palavra", match: "qualquer", country: "BR", status: "erro", total_results: null, ads_found: null, offers_found: null, google_ads: null, message: "A Meta pediu login para a busca — o IP do robô pode ter sido bloqueado.", requested_at: minsAgo(60 * 26), started_at: minsAgo(60 * 26), finished_at: minsAgo(60 * 26) },
+];
+const sAd = (search_id: number, position: number, library_id: string, offer_key: string, advertiser: string, domain: string | null, body: string, start_date: string, copies: number, site_match: boolean | null = null): Row => ({
+  search_id, position, library_id, offer_key, advertiser, domain, body, start_date, copies, cta: "Comprar agora", dest_type: "site",
+  page_url: null, landing_url: domain ? `https://${domain}/` : null, thumb_url: null, thumb_path: null, media_type: position % 2 ? "video" : "image", site_match,
+});
+const SEARCH_ADS: Row[] = [
+  sAd(1, 0, "910001", "d:brmoveis.com.br", "BR Móveis", "brmoveis.com.br", "🚨 PREÇO DE FÁBRICA — PAGAMENTO NA ENTREGA! 🚨 Aqui é DIRETO da fábrica.", daysAgo(40), 11),
+  sAd(1, 1, "910002", "d:sofaconforto.com.br", "Sofá Conforto", "sofaconforto.com.br", "Receba seu sofá e só pague na entrega. Frete grátis para todo o Brasil.", daysAgo(12), 6),
+  sAd(1, 2, "910003", "d:brmoveis.com.br", "BR Móveis", "brmoveis.com.br", "Guarda-roupa 6 portas com pagamento na entrega. Últimas unidades!", daysAgo(9), 3),
+  sAd(1, 3, "910004", "d:sofaconforto.com.br", "Sofá Conforto", "sofaconforto.com.br", "Pague só quando chegar na sua casa. Parcelamos em 12x.", daysAgo(5), 2),
+  sAd(1, 4, "910005", "a:tênis da hora", "Tênis da Hora", null, "Tênis original com pagamento na entrega, chama no WhatsApp!", daysAgo(2), 1),
+  sAd(2, 0, "920001", "us:d:glowpatch.com", "GlowPatch", "glowpatch.com", "The patch everyone is talking about. Buy 2 get 1 free + free shipping today only.", daysAgo(160), 14, true),
+  sAd(2, 1, "920002", "us:d:glowpatch.com", "Glow Patch US", "glowpatch.com", "Curb cravings in 2 weeks or your money back.", daysAgo(20), 6, true),
+  sAd(2, 2, "920003", "us:d:dealsdaily.com", "Deals Daily", "dealsdaily.com", "Today's deal: 40% off at glowpatch.com with code GLOW40.", daysAgo(3), 1, false),
+];
+
 const TABLES: Record<string, Row[]> = {
+  searches: SEARCHES, search_ads: SEARCH_ADS,
   offer_ranking: OFFERS, offer_snapshots: SNAPSHOTS, ads: ADS, keywords: KEYWORDS,
   ignored_advertisers: IGNORED, ra_new_companies: RA, runs: RUNS,
   landing_pages: LANDINGS, offer_aliases: [], offer_insights: [], alerts_sent: [],

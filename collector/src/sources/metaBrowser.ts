@@ -1,14 +1,16 @@
 import type { BrowserContext, Page } from "playwright";
 import { CARD_LINKS_SCRIPT, cleanLandingUrl, cleanPageUrl, hostOf, type CardLinks } from "../parse/links.js";
 import { isGenericDomain, parseMetaLibraryText } from "../parse/meta.js";
-import type { KeywordResult, MetaAdSource } from "../types.js";
+import type { KeywordResult, MetaAdSource, SearchMatch } from "../types.js";
 import { jitter, newContext, sleep } from "./browser.js";
 
-export function metaLibraryUrl(term: string, country = "BR") {
-  const q = encodeURIComponent(`"${term}"`);
+/** `exact` busca a frase exata (padrão da coleta); `any` aceita as palavras em qualquer ordem. */
+export function metaLibraryUrl(term: string, country = "BR", match: SearchMatch = "exact") {
+  const q = encodeURIComponent(match === "exact" ? `"${term}"` : term);
+  const type = match === "exact" ? "keyword_exact_phrase" : "keyword_unordered";
   return (
     `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}` +
-    `&q=${q}&search_type=keyword_exact_phrase&media_type=all` +
+    `&q=${q}&search_type=${type}&media_type=all` +
     `&sort_data[mode]=total_impressions&sort_data[direction]=desc`
   );
 }
@@ -29,9 +31,9 @@ export class MetaBrowserSource implements MetaAdSource {
     return this.page;
   }
 
-  async searchKeyword(term: string): Promise<KeywordResult> {
+  async searchKeyword(term: string, opts: { match?: SearchMatch } = {}): Promise<KeywordResult> {
     const page = await this.getPage();
-    await page.goto(metaLibraryUrl(term, this.opts.country), { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.goto(metaLibraryUrl(term, this.opts.country, opts.match), { waitUntil: "domcontentloaded", timeout: 60_000 });
 
     // espera os cards aparecerem (ou desiste em 20s)
     await page.waitForFunction(

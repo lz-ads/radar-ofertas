@@ -80,6 +80,7 @@ cd web && npm install && RADAR_DEMO=1 npm run dev
 | Criativos | Guarda as imagens dos anúncios em webp no Supabase Storage (o link do Facebook expira) | nada |
 | Alertas | Telegram quando uma oferta entra no top 20 ou dispara em cópias | secrets `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` |
 | Funil | ☆ no ranking, status e notas por oferta, página `/funil` | nada |
+| Pesquisar | Página `/pesquisar`: digite uma palavra ou site e o robô busca na hora os anúncios ativos na Biblioteca da Meta (site também conta os anúncios no Google) | migração `007_pesquisa.sql` + Vercel: `GITHUB_TOKEN` (veja abaixo) |
 | Status | Página `/status` com a saúde de cada etapa + aviso de falha no Telegram + vigia diário da Vercel | Vercel: `CRON_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 
 ### Chave do Gemini
@@ -93,6 +94,15 @@ A cota grátis do Gemini pode usar os textos enviados para treinar os modelos do
 2. Mande qualquer mensagem para o seu bot novo.
 3. Abra `https://api.telegram.org/bot<TOKEN>/getUpdates` no navegador e copie o número em `"chat":{"id": ...}`.
 4. No GitHub, crie os secrets `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Na Vercel, crie as mesmas variáveis e mais `CRON_SECRET` (qualquer texto longo e aleatório).
+
+### Pesquisar na hora (página `/pesquisar`)
+O painel liga o robô no GitHub Actions (workflow **Pesquisar agora**) assim que você pesquisa. O resultado aparece sozinho na página em uns 2 minutos e fica guardado por 30 dias. Ele não entra no ranking; para acompanhar sempre, use o botão **＋ coletar sempre** (palavra vira palavra-chave) ou **👁 espionar** (site/anunciante vai para a espionagem).
+
+1. No Supabase, rode `supabase/migrations/007_pesquisa.sql` no SQL Editor.
+2. No GitHub, crie um token: **Settings (do seu perfil) → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Em *Repository access*, escolha só o `radar-ofertas`; em *Permissions → Actions*, marque **Read and write**. Validade: a maior que quiser.
+3. Na Vercel, crie a variável `GITHUB_TOKEN` com esse token e faça um novo deploy. Se o repositório não for `lz-ads/radar-ofertas`, crie também `GITHUB_REPO` (ex.: `minhaconta/radar-ofertas`).
+
+Sem o token a página funciona, mas a pesquisa só roda na próxima coleta automática (6h, 12h ou 18h). Para testar no computador sem banco: `cd collector && npm run search -- --termo=loja.com.br`.
 
 ### Banco
 Instalação nova: rode `supabase/schema.sql`. Instalação antiga: rode, em ordem, os arquivos de `supabase/migrations/` que ainda não rodou.

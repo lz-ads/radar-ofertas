@@ -10,6 +10,7 @@ import { closeBrowser, jitter } from "./sources/browser.js";
 import { GoogleTransparencySource } from "./sources/googleBrowser.js";
 import { inspectLandings } from "./sources/landingBrowser.js";
 import { MetaBrowserSource } from "./sources/metaBrowser.js";
+import { processPendingSearches } from "./pesquisa.js";
 import { fetchRaNewCompanies } from "./sources/reclameAquiBrowser.js";
 import { esc, panelUrl, sendTelegram, telegramConfigured } from "./telegram.js";
 import type { KeywordResult, MetaAdSource, OfferSnapshot } from "./types.js";
@@ -489,6 +490,22 @@ async function main() {
     }
   };
 
+  // pesquisas pedidas pelo painel que ainda não rodaram (reserva do workflow "Pesquisar agora")
+  if (client && want("pesquisa")) {
+    await step("pesquisa", async () => {
+      try {
+        const r = await processPendingSearches(client);
+        if (r.done || r.failed) notes.push(`Pesquisas do painel: ${r.done} prontas${r.failed ? `, ${r.failed} com erro` : ""}`);
+      } catch (e) {
+        // migração 007 ainda não rodou: não atrapalha a coleta
+        if (/searches|search_ads/.test((e as Error).message) && /exist|schema cache|not find/i.test((e as Error).message)) {
+          notes.push("Pesquisas do painel: puladas (rode a migração 007 no Supabase)");
+          return;
+        }
+        throw e;
+      }
+    });
+  }
   if (want("meta")) await step("meta", () => runMeta(client, day));
   if (client) {
     // criativos logo depois da Meta, enquanto os links das imagens ainda valem

@@ -7,6 +7,7 @@
     "collect:meta": "tsx src/run.ts --only=meta",
     "collect:google": "tsx src/run.ts --only=google",
     "collect:ra": "tsx src/run.ts --only=ra",
+    "search": "tsx src/search.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -38,9 +38,12 @@ export interface KeywordResult {
  * Fonte de anúncios da Meta. Hoje é o robô próprio (navegador);
  * depois basta criar outra implementação (Apify, SearchAPI...) com a mesma assinatura.
  */
+/** Frase exata (padrão) ou palavras em qualquer ordem. */
+export type SearchMatch = "exact" | "any";
+
 export interface MetaAdSource {
   name: string;
-  searchKeyword(term: string): Promise<KeywordResult>;
+  searchKeyword(term: string, opts?: { match?: SearchMatch }): Promise<KeywordResult>;
   close(): Promise<void>;
 }
 

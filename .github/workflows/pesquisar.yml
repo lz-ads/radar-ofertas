@@ -1,0 +1,59 @@
+name: Pesquisar agora
+run-name: "Pesquisa ${{ github.event.inputs.id || 'pendentes' }}"
+
+# Disparado pelo painel (página Pesquisar) quando alguém busca uma palavra ou site.
+# Roda TODAS as pesquisas pendentes, então nenhuma se perde se duas chegarem juntas.
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: "ID da pesquisa (só para identificar a execução; o robô roda todas as pendentes)"
+        required: false
+        default: ""
+
+# Uma por vez, separada da coleta (não espera a coleta de 2 horas terminar)
+concurrency:
+  group: pesquisar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pesquisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: collector
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: collector/package-lock.json
+
+      - run: npm ci
+
+      # o navegador fica guardado em cache entre as pesquisas (liga bem mais rápido)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('collector/package-lock.json') }}
+
+      - name: Instalar o Chromium
+        run: |
+          npx playwright install chromium
+          # o Ubuntu do GitHub já tem as bibliotecas do Chrome; só instala se faltar alguma
+          node -e "require('playwright').chromium.launch().then(b => b.close())" || npx playwright install-deps chromium
+
+      - name: Pesquisar
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PANEL_URL: ${{ vars.PANEL_URL }}
+        run: npm run search
